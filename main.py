@@ -41,5 +41,5 @@ def upload():
     file.save(os.path.join(f'tmp/test_{current_time}.png'))
     return 'saved'
 
-
-app.run(host='0.0.0.0', port=222, debug=True, ssl_context='adhoc')
+if __name__ == '__main__':
+    app.run(host='0.0.0.0', port=80, debug=True)
