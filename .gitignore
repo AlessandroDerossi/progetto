@@ -1,0 +1,17 @@
+# Ambiente virtuale
+venv/
+env/
+
+# Cache di Python
+__pycache__/
+*.pyc
+*.pyo
+
+# File di configurazione locali
+.env
+config.json
+secrets.json
+
+# Cartelle di IDE
+.idea/
+.vscode/
