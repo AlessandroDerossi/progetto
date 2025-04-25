@@ -145,13 +145,85 @@ def logout():
 @app.route('/dashboard')
 @login_required
 def dashboard():
-    return render_template('dashboard.html', username=session.get('username'))
+    # Recuperare statistiche generali dell'utente
+    user_id = session.get('user_id')
+    conn = sqlite3.connect('boxing_tracker.db')
+    conn.row_factory = sqlite3.Row
+    cursor = conn.cursor()
+
+    # Conteggio sessioni
+    cursor.execute('SELECT COUNT(*) as session_count FROM training_sessions WHERE user_id = ?', (user_id,))
+    session_count = cursor.fetchone()['session_count']
+
+    # Conteggio pugni totali
+    cursor.execute('''
+        SELECT COUNT(*) as punch_count 
+        FROM punches p 
+        JOIN training_sessions t ON p.session_id = t.id 
+        WHERE t.user_id = ?
+    ''', (user_id,))
+    punch_count = cursor.fetchone()['punch_count']
+
+    # Intensità media
+    cursor.execute('''
+        SELECT AVG(p.punch_intensity) as avg_intensity 
+        FROM punches p 
+        JOIN training_sessions t ON p.session_id = t.id 
+        WHERE t.user_id = ?
+    ''', (user_id,))
+    avg_intensity = cursor.fetchone()['avg_intensity']
+    if avg_intensity is None:
+        avg_intensity = 0
+    else:
+        avg_intensity = round(avg_intensity, 2)
+
+    conn.close()
+
+    return render_template('dashboard.html',
+                           username=session.get('username'),
+                           session_count=session_count,
+                           punch_count=punch_count,
+                           avg_intensity=avg_intensity)
 
 
-@app.route('/training')
+@app.route('/stats')
 @login_required
-def training():
-    return render_template('training.html', username=session.get('username'))
+def stats():
+    user_id = session.get('user_id')
+
+    conn = sqlite3.connect('boxing_tracker.db')
+    conn.row_factory = sqlite3.Row
+    cursor = conn.cursor()
+
+    # Recupera le sessioni di allenamento dell'utente
+    cursor.execute('''
+        SELECT id, date, duration FROM training_sessions 
+        WHERE user_id = ? 
+        ORDER BY date DESC
+    ''', (user_id,))
+    sessions = cursor.fetchall()
+
+    sessions_data = []
+    for sess in sessions:
+        # Per ogni sessione, recupera il conteggio dei pugni e l'intensità media
+        cursor.execute('''
+            SELECT COUNT(*) as punch_count, AVG(punch_intensity) as avg_intensity 
+            FROM punches 
+            WHERE session_id = ?
+        ''', (sess['id'],))
+        punch_stats = cursor.fetchone()
+
+        sessions_data.append({
+            'id': sess['id'],
+            'date': sess['date'],
+            'duration': sess['duration'],
+            'punch_count': punch_stats['punch_count'],
+            'avg_intensity': round(punch_stats['avg_intensity'], 2) if punch_stats['avg_intensity'] else 0
+        })
+
+    conn.close()
+
+    return render_template('stats.html', sessions=sessions_data, username=session.get('username'))
 
 
 @app.route('/start_session', methods=['POST'])
@@ -172,7 +244,24 @@ def start_session():
     conn.close()
 
     session['training_session_id'] = session_id
-    return redirect(url_for('training'))
+    session['training_start_time'] = date_str
+
+    # Reindirizza alla nuova pagina di allenamento attivo invece che a training
+    return redirect(url_for('active_training'))
+
+
+@app.route('/active_training')
+@login_required
+def active_training():
+    if 'training_session_id' not in session:
+        flash('Nessuna sessione di allenamento attiva')
+        return redirect(url_for('dashboard'))
+
+    start_time = session.get('training_start_time', datetime.now().strftime("%Y-%m-%d %H:%M:%S"))
+
+    return render_template('active_training.html',
+                           username=session.get('username'),
+                           start_time=start_time)
 
 
 @app.route('/end_session', methods=['POST'])
@@ -180,9 +269,31 @@ def start_session():
 def end_session():
     if 'training_session_id' in session:
         session_id = session['training_session_id']
-        # Qui potresti calcolare la durata e aggiornarla nel database
+
+        # Calcola la durata della sessione
+        conn = sqlite3.connect('boxing_tracker.db')
+        cursor = conn.cursor()
+
+        # Ottiene la data di inizio sessione dal database
+        cursor.execute('SELECT date FROM training_sessions WHERE id = ?', (session_id,))
+        start_time_str = cursor.fetchone()[0]
+        start_time = datetime.strptime(start_time_str, "%Y-%m-%d %H:%M:%S")
+
+        # Calcola la durata in secondi
+        end_time = datetime.now()
+        duration = int((end_time - start_time).total_seconds())
+
+        # Aggiorna la durata nel database
+        cursor.execute('UPDATE training_sessions SET duration = ? WHERE id = ?', (duration, session_id))
+        conn.commit()
+        conn.close()
+
+        # Rimuovi le informazioni sulla sessione dalla sessione utente
         session.pop('training_session_id', None)
-        return redirect(url_for('dashboard'))
+        session.pop('training_start_time', None)
+
+        flash('Allenamento terminato e salvato con successo!')
+
     return redirect(url_for('dashboard'))
 
 
@@ -252,44 +363,29 @@ def upload_data():
         return 'Error saving data', 500
 
 
-@app.route('/stats')
+@app.route('/training')
 @login_required
-def stats():
+def training():
     user_id = session.get('user_id')
 
+    # Recupera i dati di allenamento per visualizzare i progressi
     conn = sqlite3.connect('boxing_tracker.db')
     conn.row_factory = sqlite3.Row
     cursor = conn.cursor()
 
-    # Recupera le sessioni di allenamento dell'utente
+    # Recupera le sessioni più recenti
     cursor.execute('''
         SELECT id, date, duration FROM training_sessions 
         WHERE user_id = ? 
-        ORDER BY date DESC
+        ORDER BY date DESC LIMIT 5
     ''', (user_id,))
-    sessions = cursor.fetchall()
-
-    sessions_data = []
-    for sess in sessions:
-        # Per ogni sessione, recupera il conteggio dei pugni e l'intensità media
-        cursor.execute('''
-            SELECT COUNT(*) as punch_count, AVG(punch_intensity) as avg_intensity 
-            FROM punches 
-            WHERE session_id = ?
-        ''', (sess['id'],))
-        punch_stats = cursor.fetchone()
-
-        sessions_data.append({
-            'id': sess['id'],
-            'date': sess['date'],
-            'duration': sess['duration'],
-            'punch_count': punch_stats['punch_count'],
-            'avg_intensity': round(punch_stats['avg_intensity'], 2) if punch_stats['avg_intensity'] else 0
-        })
+    recent_sessions = cursor.fetchall()
 
     conn.close()
 
-    return render_template('stats.html', sessions=sessions_data, username=session.get('username'))
+    return render_template('training.html',
+                           username=session.get('username'),
+                           recent_sessions=recent_sessions)
 
 
 if __name__ == '__main__':

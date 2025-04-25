@@ -36,6 +36,13 @@
             background-color: #c82333;
             border-color: #c82333;
         }
+        .stats-item {
+            text-align: center;
+            padding: 15px;
+        }
+        .stats-divider {
+            border-right: 1px solid #dee2e6;
+        }
     </style>
 </head>
 <body>
@@ -55,7 +62,7 @@
                         <a class="nav-link" href="{{ url_for('stats') }}">Statistiche</a>
                     </li>
                     <li class="nav-item">
-                        <a class="nav-link" href="{{ url_for('training') }}">Allenamento</a>
+                        <a class="nav-link" href="{{ url_for('training') }}">Progressi</a>
                     </li>
                 </ul>
                 <div class="navbar-nav">
@@ -86,30 +93,27 @@
     <!-- Dashboard Content -->
     <div class="container">
         <div class="row">
-            <div class="col-md-4">
+            <div class="col-12">
                 <div class="card">
                     <div class="card-body">
-                        <h5 class="card-title">Allenamenti completati</h5>
-                        <p class="card-text display-4">0</p>
-                        <a href="{{ url_for('stats') }}" class="btn btn-outline-primary">Vedi dettagli</a>
-                    </div>
-                </div>
-            </div>
-            <div class="col-md-4">
-                <div class="card">
-                    <div class="card-body">
-                        <h5 class="card-title">Pugni totali</h5>
-                        <p class="card-text display-4">0</p>
-                        <a href="{{ url_for('stats') }}" class="btn btn-outline-primary">Vedi dettagli</a>
-                    </div>
-                </div>
-            </div>
-            <div class="col-md-4">
-                <div class="card">
-                    <div class="card-body">
-                        <h5 class="card-title">Intensità media</h5>
-                        <p class="card-text display-4">0.0</p>
-                        <a href="{{ url_for('stats') }}" class="btn btn-outline-primary">Vedi dettagli</a>
+                        <h5 class="card-title mb-4">Riepilogo prestazioni</h5>
+                        <div class="row">
+                            <div class="col-md-4 stats-item stats-divider">
+                                <h6>Allenamenti completati</h6>
+                                <p class="display-4">{{ session_count }}</p>
+                            </div>
+                            <div class="col-md-4 stats-item stats-divider">
+                                <h6>Pugni totali</h6>
+                                <p class="display-4">{{ punch_count }}</p>
+                            </div>
+                            <div class="col-md-4 stats-item">
+                                <h6>Intensità media</h6>
+                                <p class="display-4">{{ avg_intensity }}</p>
+                            </div>
+                        </div>
+                        <div class="text-center mt-3">
+                            <a href="{{ url_for('stats') }}" class="btn btn-outline-primary">Vedi dettagli</a>
+                        </div>
                     </div>
                 </div>
             </div>
@@ -118,10 +122,10 @@
         <div class="row mt-4">
             <div class="col-12">
                 <div class="card">
-                    <div class="card-body">
+                    <div class="card-body text-center">
                         <h5 class="card-title">I tuoi progressi</h5>
-                        <p class="card-text">Qui verranno visualizzati i grafici con i tuoi progressi nel tempo.</p>
-                        <p>Per iniziare a tracciare i tuoi progressi, avvia un nuovo allenamento!</p>
+                        <p class="card-text">Visualizza i dettagli dei tuoi allenamenti e monitora i tuoi progressi.</p>
+                        <a href="{{ url_for('training') }}" class="btn btn-primary mt-3">Visualizza progressi</a>
                     </div>
                 </div>
             </div>

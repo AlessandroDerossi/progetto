@@ -42,13 +42,10 @@
             <div class="collapse navbar-collapse" id="navbarNav">
                 <ul class="navbar-nav me-auto">
                     <li class="nav-item">
-                        <a class="nav-link" href="{{ url_for('dashboard') }}">Dashboard</a>
+                        <a class="nav-link {% if request.endpoint == 'dashboard' %}active{% endif %}" href="{{ url_for('dashboard') }}">Dashboard</a>
                     </li>
                     <li class="nav-item">
-                        <a class="nav-link active" href="{{ url_for('stats') }}">Statistiche</a>
-                    </li>
-                    <li class="nav-item">
-                        <a class="nav-link" href="{{ url_for('training') }}">Allenamento</a>
+                        <a class="nav-link {% if request.endpoint == 'training' %}active{% endif %}" href="{{ url_for('training') }}">Progressi</a>                    </li>
                     </li>
                 </ul>
                 <div class="navbar-nav">
