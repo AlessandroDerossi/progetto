@@ -1,0 +1,116 @@
+<!DOCTYPE html>
+<html lang="it">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Boxing Tracker - Statistiche</title>
+    <style>
+        body {
+            font-family: Arial, sans-serif;
+            margin: 0;
+            padding: 20px;
+            background-color: #f4f4f4;
+        }
+        .container {
+            max-width: 800px;
+            margin: 0 auto;
+            background-color: white;
+            padding: 20px;
+            border-radius: 5px;
+            box-shadow: 0 0 10px rgba(0,0,0,0.1);
+        }
+        h1 {
+            color: #333;
+            text-align: center;
+        }
+        .header {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            margin-bottom: 20px;
+        }
+        .session-card {
+            background-color: #f9f9f9;
+            border-left: 4px solid #4CAF50;
+            margin-bottom: 15px;
+            padding: 15px;
+            border-radius: 3px;
+        }
+        .session-title {
+            font-weight: bold;
+            margin-bottom: 10px;
+        }
+        .session-details {
+            display: grid;
+            grid-template-columns: repeat(3, 1fr);
+            gap: 10px;
+        }
+        .stat-box {
+            background-color: #e9e9e9;
+            padding: 10px;
+            border-radius: 3px;
+            text-align: center;
+        }
+        .stat-value {
+            font-size: 1.2em;
+            font-weight: bold;
+            color: #4CAF50;
+        }
+        .stat-label {
+            font-size: 0.9em;
+            color: #666;
+        }
+        .no-sessions {
+            text-align: center;
+            padding: 30px;
+            color: #666;
+        }
+        .nav-link {
+            text-decoration: none;
+            background-color: #4CAF50;
+            color: white;
+            padding: 10px 15px;
+            border-radius: 3px;
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <div class="header">
+            <h1>Statistiche Allenamenti</h1>
+            <div>
+                <span>Benvenuto, {{ username }}</span>
+                <a href="{{ url_for('dashboard') }}" class="nav-link">Dashboard</a>
+                <a href="{{ url_for('logout') }}" class="nav-link">Logout</a>
+            </div>
+        </div>
+
+        {% if sessions %}
+            {% for session in sessions %}
+                <div class="session-card">
+                    <div class="session-title">Sessione del {{ session.date }}</div>
+                    <div class="session-details">
+                        <div class="stat-box">
+                            <div class="stat-value">{{ session.duration }} min</div>
+                            <div class="stat-label">Durata</div>
+                        </div>
+                        <div class="stat-box">
+                            <div class="stat-value">{{ session.punch_count }}</div>
+                            <div class="stat-label">Pugni totali</div>
+                        </div>
+                        <div class="stat-box">
+                            <div class="stat-value">{{ session.avg_intensity }}</div>
+                            <div class="stat-label">Intensità media</div>
+                        </div>
+                    </div>
+                </div>
+            {% endfor %}
+        {% else %}
+            <div class="no-sessions">
+                <p>Non hai ancora completato sessioni di allenamento.</p>
+                <a href="{{ url_for('training') }}" class="nav-link">Inizia un allenamento</a>
+            </div>
+        {% endif %}
+    </div>
+</body>
+</html>
