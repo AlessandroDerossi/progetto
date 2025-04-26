@@ -29,6 +29,12 @@
             height: 300px;
             width: 100%;
         }
+        .no-data-message {
+            text-align: center;
+            padding: 100px 0;
+            color: #6c757d;
+            font-style: italic;
+        }
     </style>
 </head>
 <body>
@@ -45,7 +51,7 @@
                         <a class="nav-link {% if request.endpoint == 'dashboard' %}active{% endif %}" href="{{ url_for('dashboard') }}">Dashboard</a>
                     </li>
                     <li class="nav-item">
-                        <a class="nav-link {% if request.endpoint == 'training' %}active{% endif %}" href="{{ url_for('training') }}">Progressi</a>                    </li>
+                        <a class="nav-link {% if request.endpoint == 'training' %}active{% endif %}" href="{{ url_for('training') }}">Progressi</a>
                     </li>
                 </ul>
                 <div class="navbar-nav">
@@ -76,7 +82,11 @@
                     <div class="card-body">
                         <h5 class="card-title">Grafico dei pugni per sessione</h5>
                         <div class="chart-container">
-                            <canvas id="punchesChart"></canvas>
+                            {% if sessions %}
+                                <canvas id="punchesChart"></canvas>
+                            {% else %}
+                                <div class="no-data-message">Non ci sono dati sufficienti per visualizzare questo grafico</div>
+                            {% endif %}
                         </div>
                     </div>
                 </div>
@@ -89,7 +99,11 @@
                     <div class="card-body">
                         <h5 class="card-title">Grafico dell'intensità media</h5>
                         <div class="chart-container">
-                            <canvas id="intensityChart"></canvas>
+                            {% if sessions %}
+                                <canvas id="intensityChart"></canvas>
+                            {% else %}
+                                <div class="no-data-message">Non ci sono dati sufficienti per visualizzare questo grafico</div>
+                            {% endif %}
                         </div>
                     </div>
                 </div>
@@ -99,45 +113,11 @@
                     <div class="card-body">
                         <h5 class="card-title">Durata degli allenamenti</h5>
                         <div class="chart-container">
-                            <canvas id="durationChart"></canvas>
-                        </div>
-                    </div>
-                </div>
-            </div>
-        </div>
-
-        <div class="row mt-4">
-            <div class="col-12">
-                <div class="card">
-                    <div class="card-body">
-                        <h5 class="card-title">Storico sessioni di allenamento</h5>
-                        <div class="table-responsive">
-                            <table class="table table-striped">
-                                <thead>
-                                    <tr>
-                                        <th>Data</th>
-                                        <th>Durata</th>
-                                        <th>Pugni</th>
-                                        <th>Intensità media</th>
-                                    </tr>
-                                </thead>
-                                <tbody>
-                                    {% if sessions %}
-                                        {% for session in sessions %}
-                                            <tr>
-                                                <td>{{ session.date }}</td>
-                                                <td>{{ session.duration }} sec</td>
-                                                <td>{{ session.punch_count }}</td>
-                                                <td>{{ session.avg_intensity }}</td>
-                                            </tr>
-                                        {% endfor %}
-                                    {% else %}
-                                        <tr>
-                                            <td colspan="4" class="text-center">Nessuna sessione di allenamento registrata</td>
-                                        </tr>
-                                    {% endif %}
-                                </tbody>
-                            </table>
+                            {% if sessions %}
+                                <canvas id="durationChart"></canvas>
+                            {% else %}
+                                <div class="no-data-message">Non ci sono dati sufficienti per visualizzare questo grafico</div>
+                            {% endif %}
                         </div>
                     </div>
                 </div>
@@ -155,17 +135,31 @@
     <script>
         // Dati per i grafici
         {% if sessions %}
+            // Formatta le date per una visualizzazione più leggibile
+            const formatShortDate = (dateStr) => {
+                const date = new Date(dateStr);
+                return date.toLocaleDateString('it-IT', {
+                    day: '2-digit',
+                    month: '2-digit',
+                    hour: '2-digit',
+                    minute: '2-digit'
+                });
+            };
+
             const sessionDates = [{% for session in sessions %}'{{ session.date }}'{% if not loop.last %}, {% endif %}{% endfor %}];
+            const formattedDates = sessionDates.map(formatShortDate);
             const punchCounts = [{% for session in sessions %}{{ session.punch_count }}{% if not loop.last %}, {% endif %}{% endfor %}];
             const avgIntensities = [{% for session in sessions %}{{ session.avg_intensity }}{% if not loop.last %}, {% endif %}{% endfor %}];
-            const durations = [{% for session in sessions %}{{ session.duration }}{% if not loop.last %}, {% endif %}{% endfor %}];
+
+            // Converti durata da secondi a minuti per una migliore visualizzazione
+            const durations = [{% for session in sessions %}{{ session.duration / 60 }}{% if not loop.last %}, {% endif %}{% endfor %}];
 
             // Grafico pugni per sessione
             const punchesCtx = document.getElementById('punchesChart').getContext('2d');
             const punchesChart = new Chart(punchesCtx, {
                 type: 'bar',
                 data: {
-                    labels: sessionDates,
+                    labels: formattedDates,
                     datasets: [{
                         label: 'Numero di pugni',
                         data: punchCounts,
@@ -179,7 +173,17 @@
                     maintainAspectRatio: false,
                     scales: {
                         y: {
-                            beginAtZero: true
+                            beginAtZero: true,
+                            title: {
+                                display: true,
+                                text: 'Numero di pugni'
+                            }
+                        },
+                        x: {
+                            title: {
+                                display: true,
+                                text: 'Data sessione'
+                            }
                         }
                     }
                 }
@@ -190,14 +194,15 @@
             const intensityChart = new Chart(intensityCtx, {
                 type: 'line',
                 data: {
-                    labels: sessionDates,
+                    labels: formattedDates,
                     datasets: [{
                         label: 'Intensità media',
                         data: avgIntensities,
                         backgroundColor: 'rgba(54, 162, 235, 0.2)',
                         borderColor: 'rgba(54, 162, 235, 1)',
                         borderWidth: 2,
-                        tension: 0.1
+                        tension: 0.1,
+                        fill: true
                     }]
                 },
                 options: {
@@ -205,7 +210,17 @@
                     maintainAspectRatio: false,
                     scales: {
                         y: {
-                            beginAtZero: true
+                            beginAtZero: true,
+                            title: {
+                                display: true,
+                                text: 'Intensità'
+                            }
+                        },
+                        x: {
+                            title: {
+                                display: true,
+                                text: 'Data sessione'
+                            }
                         }
                     }
                 }
@@ -216,14 +231,15 @@
             const durationChart = new Chart(durationCtx, {
                 type: 'line',
                 data: {
-                    labels: sessionDates,
+                    labels: formattedDates,
                     datasets: [{
-                        label: 'Durata (secondi)',
+                        label: 'Durata (minuti)',
                         data: durations,
                         backgroundColor: 'rgba(75, 192, 192, 0.2)',
                         borderColor: 'rgba(75, 192, 192, 1)',
                         borderWidth: 2,
-                        tension: 0.1
+                        tension: 0.1,
+                        fill: true
                     }]
                 },
                 options: {
@@ -231,7 +247,17 @@
                     maintainAspectRatio: false,
                     scales: {
                         y: {
-                            beginAtZero: true
+                            beginAtZero: true,
+                            title: {
+                                display: true,
+                                text: 'Minuti'
+                            }
+                        },
+                        x: {
+                            title: {
+                                display: true,
+                                text: 'Data sessione'
+                            }
                         }
                     }
                 }

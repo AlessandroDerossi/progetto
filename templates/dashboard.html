@@ -27,6 +27,8 @@
         .btn-primary:hover {
             background-color: #a71d2a;
             border-color: #a71d2a;
+            /* Assicurarsi che il pulsante rimanga visibile */
+            opacity: 0.9;
         }
         .btn-outline-primary {
             color: #c82333;
@@ -35,6 +37,7 @@
         .btn-outline-primary:hover {
             background-color: #c82333;
             border-color: #c82333;
+            color: white;
         }
         .stats-item {
             text-align: center;
@@ -57,12 +60,6 @@
                 <ul class="navbar-nav me-auto">
                     <li class="nav-item">
                         <a class="nav-link active" href="{{ url_for('dashboard') }}">Dashboard</a>
-                    </li>
-                    <li class="nav-item">
-                        <a class="nav-link" href="{{ url_for('stats') }}">Statistiche</a>
-                    </li>
-                    <li class="nav-item">
-                        <a class="nav-link" href="{{ url_for('training') }}">Progressi</a>
                     </li>
                 </ul>
                 <div class="navbar-nav">

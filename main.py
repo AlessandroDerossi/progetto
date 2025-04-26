@@ -13,6 +13,27 @@ app = Flask(__name__)
 app.secret_key = 'your_secret_key_here'  # Importante per la sessione, cambia con una chiave sicura
 
 
+# Funzione per aggiornare la struttura del database
+def update_db_structure():
+    conn = sqlite3.connect('boxing_tracker.db')
+    cursor = conn.cursor()
+
+    # Controlliamo se la colonna has_activity esiste già
+    cursor.execute("PRAGMA table_info(training_sessions)")
+    columns = [column[1] for column in cursor.fetchall()]
+
+    # Se la colonna non esiste, la aggiungiamo
+    if 'has_activity' not in columns:
+        try:
+            cursor.execute('ALTER TABLE training_sessions ADD COLUMN has_activity BOOLEAN DEFAULT 0')
+            conn.commit()
+            print("Colonna has_activity aggiunta con successo")
+        except sqlite3.Error as e:
+            print(f"Errore nell'aggiungere la colonna has_activity: {e}")
+
+    conn.close()
+
+
 # Funzione per inizializzare il database
 def init_db():
     conn = sqlite3.connect('boxing_tracker.db')
@@ -35,6 +56,7 @@ def init_db():
         user_id INTEGER NOT NULL,
         date TEXT NOT NULL,
         duration INTEGER,
+        has_activity BOOLEAN DEFAULT 0,
         FOREIGN KEY (user_id) REFERENCES users (id)
     )
     ''')
@@ -59,6 +81,17 @@ def init_db():
 
 # Inizializzazione del database
 init_db()
+update_db_structure()  # Aggiorniamo la struttura se necessario
+
+
+# Funzione per verificare se una sessione ha attività
+def session_has_activity(session_id):
+    conn = sqlite3.connect('boxing_tracker.db')
+    cursor = conn.cursor()
+    cursor.execute('SELECT COUNT(*) FROM punches WHERE session_id = ?', (session_id,))
+    count = cursor.fetchone()[0]
+    conn.close()
+    return count > 0
 
 
 # Middleware per verificare se l'utente è loggato
@@ -151,8 +184,19 @@ def dashboard():
     conn.row_factory = sqlite3.Row
     cursor = conn.cursor()
 
-    # Conteggio sessioni
-    cursor.execute('SELECT COUNT(*) as session_count FROM training_sessions WHERE user_id = ?', (user_id,))
+    try:
+        # Prova a usare la colonna has_activity
+        cursor.execute('SELECT COUNT(*) as session_count FROM training_sessions WHERE user_id = ? AND has_activity = 1',
+                       (user_id,))
+    except sqlite3.OperationalError:
+        # Se la colonna non esiste, utilizziamo una JOIN con punches
+        cursor.execute('''
+            SELECT COUNT(DISTINCT t.id) as session_count 
+            FROM training_sessions t 
+            JOIN punches p ON t.id = p.session_id 
+            WHERE t.user_id = ?
+            ''', (user_id,))
+
     session_count = cursor.fetchone()['session_count']
 
     # Conteggio pugni totali
@@ -195,12 +239,23 @@ def stats():
     conn.row_factory = sqlite3.Row
     cursor = conn.cursor()
 
-    # Recupera le sessioni di allenamento dell'utente
-    cursor.execute('''
-        SELECT id, date, duration FROM training_sessions 
-        WHERE user_id = ? 
-        ORDER BY date DESC
-    ''', (user_id,))
+    # Recupera le sessioni di allenamento dell'utente (solo quelle con attività)
+    try:
+        cursor.execute('''
+            SELECT id, date, duration FROM training_sessions 
+            WHERE user_id = ? AND has_activity = 1 
+            ORDER BY date DESC
+        ''', (user_id,))
+    except sqlite3.OperationalError:
+        # Se la colonna has_activity non esiste, selezioniamo le sessioni che hanno punches
+        cursor.execute('''
+            SELECT DISTINCT t.id, t.date, t.duration 
+            FROM training_sessions t 
+            JOIN punches p ON t.id = p.session_id 
+            WHERE t.user_id = ? 
+            ORDER BY t.date DESC
+        ''', (user_id,))
+
     sessions = cursor.fetchall()
 
     sessions_data = []
@@ -235,10 +290,20 @@ def start_session():
 
     conn = sqlite3.connect('boxing_tracker.db')
     cursor = conn.cursor()
-    cursor.execute(
-        'INSERT INTO training_sessions (user_id, date, duration) VALUES (?, ?, ?)',
-        (user_id, date_str, 0)
-    )
+
+    try:
+        # Prova a includere has_activity
+        cursor.execute(
+            'INSERT INTO training_sessions (user_id, date, duration, has_activity) VALUES (?, ?, ?, ?)',
+            (user_id, date_str, 0, 0)  # Inizia con has_activity = 0
+        )
+    except sqlite3.OperationalError:
+        # Se has_activity non esiste, inseriamo senza quella colonna
+        cursor.execute(
+            'INSERT INTO training_sessions (user_id, date, duration) VALUES (?, ?, ?)',
+            (user_id, date_str, 0)
+        )
+
     session_id = cursor.lastrowid
     conn.commit()
     conn.close()
@@ -246,7 +311,7 @@ def start_session():
     session['training_session_id'] = session_id
     session['training_start_time'] = date_str
 
-    # Reindirizza alla nuova pagina di allenamento attivo invece che a training
+    # Reindirizza alla nuova pagina di allenamento attivo
     return redirect(url_for('active_training'))
 
 
@@ -283,8 +348,23 @@ def end_session():
         end_time = datetime.now()
         duration = int((end_time - start_time).total_seconds())
 
-        # Aggiorna la durata nel database
-        cursor.execute('UPDATE training_sessions SET duration = ? WHERE id = ?', (duration, session_id))
+        # Verifica se ci sono state attività (pugni) in questa sessione
+        cursor.execute('SELECT COUNT(*) FROM punches WHERE session_id = ?', (session_id,))
+        punch_count = cursor.fetchone()[0]
+
+        try:
+            # Aggiorna la durata e imposta has_activity = 1 se ci sono stati pugni
+            cursor.execute(
+                'UPDATE training_sessions SET duration = ?, has_activity = ? WHERE id = ?',
+                (duration, 1 if punch_count > 0 else 0, session_id)
+            )
+        except sqlite3.OperationalError:
+            # Se has_activity non esiste, aggiorniamo solo la durata
+            cursor.execute(
+                'UPDATE training_sessions SET duration = ? WHERE id = ?',
+                (duration, session_id)
+            )
+
         conn.commit()
         conn.close()
 
@@ -309,6 +389,13 @@ def upload_data_buffer():
 
         conn = sqlite3.connect('boxing_tracker.db')
         cursor = conn.cursor()
+
+        # Prova a impostare has_activity = 1
+        try:
+            cursor.execute('UPDATE training_sessions SET has_activity = 1 WHERE id = ?', (session_id,))
+        except sqlite3.OperationalError:
+            # Se has_activity non esiste, continuiamo senza errori
+            pass
 
         for point in data:
             now = datetime.now().strftime("%Y-%m-%d %H:%M:%S.%f")
@@ -350,6 +437,14 @@ def upload_data():
 
         conn = sqlite3.connect('boxing_tracker.db')
         cursor = conn.cursor()
+
+        # Prova a impostare has_activity = 1
+        try:
+            cursor.execute('UPDATE training_sessions SET has_activity = 1 WHERE id = ?', (session_id,))
+        except sqlite3.OperationalError:
+            # Se has_activity non esiste, continuiamo senza errori
+            pass
+
         cursor.execute(
             'INSERT INTO punches (session_id, timestamp, acceleration_x, acceleration_y, acceleration_z, punch_intensity) VALUES (?, ?, ?, ?, ?, ?)',
             (session_id, now, i, j, k, intensity)
@@ -373,19 +468,51 @@ def training():
     conn.row_factory = sqlite3.Row
     cursor = conn.cursor()
 
-    # Recupera le sessioni più recenti
-    cursor.execute('''
-        SELECT id, date, duration FROM training_sessions 
-        WHERE user_id = ? 
-        ORDER BY date DESC LIMIT 5
-    ''', (user_id,))
-    recent_sessions = cursor.fetchall()
+    # Recupera le sessioni di allenamento dell'utente (solo quelle con attività)
+    try:
+        cursor.execute('''
+            SELECT id, date, duration FROM training_sessions 
+            WHERE user_id = ? AND has_activity = 1 
+            ORDER BY date DESC
+        ''', (user_id,))
+    except sqlite3.OperationalError:
+        # Se la colonna has_activity non esiste, selezioniamo le sessioni che hanno punches
+        cursor.execute('''
+            SELECT DISTINCT t.id, t.date, t.duration 
+            FROM training_sessions t 
+            JOIN punches p ON t.id = p.session_id 
+            WHERE t.user_id = ? 
+            ORDER BY t.date DESC
+        ''', (user_id,))
+
+    sessions = cursor.fetchall()
+
+    # Prepara i dati nel formato necessario per i grafici
+    sessions_data = []
+    for sess in sessions:
+        # Per ogni sessione, recupera il conteggio dei pugni e l'intensità media
+        cursor.execute('''
+            SELECT COUNT(*) as punch_count, AVG(punch_intensity) as avg_intensity 
+            FROM punches 
+            WHERE session_id = ?
+        ''', (sess['id'],))
+        punch_stats = cursor.fetchone()
+
+        sessions_data.append({
+            'id': sess['id'],
+            'date': sess['date'],
+            'duration': sess['duration'],
+            'punch_count': punch_stats['punch_count'],
+            'avg_intensity': round(punch_stats['avg_intensity'], 2) if punch_stats['avg_intensity'] else 0
+        })
 
     conn.close()
-
+    # Aggiungi prima del return
+    print(f"Sessions data for training: {sessions_data}")
     return render_template('training.html',
-                           username=session.get('username'),
-                           recent_sessions=recent_sessions)
+                          username=session.get('username'),
+
+                          sessions=sessions_data)  # Passa i dati delle sessioni al template
 
 
 if __name__ == '__main__':

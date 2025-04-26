@@ -47,18 +47,54 @@
             gap: 10px;
             margin: 20px 0;
         }
+        /* Stili migliorati per i pulsanti di controllo */
         .btn-start {
             background-color: #28a745;
             border-color: #28a745;
+            color: white;
+            font-weight: bold;
+        }
+        .btn-start:hover {
+            background-color: #218838;
+            border-color: #1e7e34;
+            color: white;
+            opacity: 0.95;
+        }
+        .btn-resume {
+            background-color: #28a745;
+            border-color: #28a745;
+            color: white;
+            font-weight: bold;
+        }
+        .btn-resume:hover {
+            background-color: #218838;
+            border-color: #1e7e34;
+            color: white;
+            opacity: 0.95;
         }
         .btn-pause {
             background-color: #ffc107;
             border-color: #ffc107;
             color: #212529;
+            font-weight: bold;
+        }
+        .btn-pause:hover {
+            background-color: #e0a800;
+            border-color: #d39e00;
+            color: #212529;
+            opacity: 0.95;
         }
         .btn-stop {
             background-color: #dc3545;
             border-color: #dc3545;
+            color: white;
+            font-weight: bold;
+        }
+        .btn-stop:hover {
+            background-color: #c82333;
+            border-color: #bd2130;
+            color: white;
+            opacity: 0.95;
         }
     </style>
 </head>
@@ -73,10 +109,10 @@
             <div class="collapse navbar-collapse" id="navbarNav">
                 <ul class="navbar-nav me-auto">
                     <li class="nav-item">
-                        <a class="nav-link" href="{{ url_for('dashboard') }}">Dashboard</a>
+                        <a class="nav-link {% if request.endpoint == 'dashboard' %}active{% endif %}" href="{{ url_for('dashboard') }}">Dashboard</a>
                     </li>
                     <li class="nav-item">
-                        <a class="nav-link" href="{{ url_for('stats') }}">Statistiche</a>
+                        <a class="nav-link {% if request.endpoint == 'active_training' %}active{% endif %}" href="{{ url_for('active_training') }}">Nuovo Allenamento</a>
                     </li>
                 </ul>
                 <div class="navbar-nav">
@@ -107,9 +143,10 @@
                     <div class="card-body">
                         <div class="timer" id="timer">00:00:00</div>
                         <div class="control-buttons">
-                            <button id="startButton" class="btn btn-start text-white">Inizia</button>
+                            <button id="startButton" class="btn btn-start">Inizia</button>
+                            <button id="resumeButton" class="btn btn-resume" style="display: none;">Riprendi</button>
                             <button id="pauseButton" class="btn btn-pause" disabled>Pausa</button>
-                            <button id="stopButton" class="btn btn-stop text-white" disabled>Termina</button>
+                            <button id="stopButton" class="btn btn-stop" disabled>Termina</button>
                         </div>
                     </div>
                 </div>
@@ -146,6 +183,7 @@
     <script>
         document.addEventListener('DOMContentLoaded', function() {
             const startButton = document.getElementById('startButton');
+            const resumeButton = document.getElementById('resumeButton');
             const pauseButton = document.getElementById('pauseButton');
             const stopButton = document.getElementById('stopButton');
             const timerDisplay = document.getElementById('timer');
@@ -157,6 +195,7 @@
             let isRunning = false;
             let punches = 0;
             let totalIntensity = 0;
+            let hasPunches = false;  // Flag per verificare se ci sono stati pugni reali
 
             // Simula il rilevamento dei pugni (in un'app reale, questo verrebbe dai sensori)
             function simulatePunchDetection() {
@@ -168,6 +207,7 @@
                             const intensity = (Math.random() * 10 + 5).toFixed(2);
                             punches++;
                             totalIntensity += parseFloat(intensity);
+                            hasPunches = true;  // Impostiamo il flag a true quando viene rilevato un pugno
 
                             punchCounter.textContent = punches;
                             avgIntensity.textContent = (totalIntensity / punches).toFixed(2);
@@ -214,9 +254,22 @@
                     timer = setInterval(updateTimer, 1000);
                     simulatePunchDetection();
 
-                    startButton.disabled = true;
+                    startButton.style.display = 'none';
+                    resumeButton.style.display = 'none';
                     pauseButton.disabled = false;
                     stopButton.disabled = false;
+                }
+            });
+
+            resumeButton.addEventListener('click', function() {
+                if (!isRunning) {
+                    isRunning = true;
+                    timer = setInterval(updateTimer, 1000);
+                    simulatePunchDetection();
+
+                    startButton.style.display = 'none';
+                    resumeButton.style.display = 'none';
+                    pauseButton.disabled = false;
                 }
             });
 
@@ -225,7 +278,8 @@
                     isRunning = false;
                     clearInterval(timer);
 
-                    startButton.disabled = false;
+                    startButton.style.display = 'none';
+                    resumeButton.style.display = 'inline-block';
                     pauseButton.disabled = true;
                 }
             });
@@ -233,6 +287,13 @@
             stopButton.addEventListener('click', function() {
                 isRunning = false;
                 clearInterval(timer);
+
+                // Controllo se l'allenamento aveva pugni reali prima di terminare
+                if (!hasPunches) {
+                    alert("Allenamento terminato senza attività registrate. Non verrà salvato nel conteggio.");
+                    window.location.href = '{{ url_for("dashboard") }}';
+                    return;
+                }
 
                 // Invia richiesta per terminare la sessione
                 fetch('{{ url_for("end_session") }}', {
