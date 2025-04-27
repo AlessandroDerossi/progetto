@@ -2,99 +2,35 @@ from flask import Flask, render_template, request, redirect, url_for, session, f
 import os
 from datetime import datetime
 import json
-import sqlite3
 from werkzeug.security import generate_password_hash, check_password_hash
+from google.cloud import firestore
 
-# requires pyopenssl
-# pip install pyopenssl
-# pip install werkzeug
+# requirements:
+# pip install pyopenssl werkzeug google-cloud-firestore
+# pip install flask
 
 app = Flask(__name__)
-app.secret_key = 'your_secret_key_here'  # Importante per la sessione, cambia con una chiave sicura
+app.secret_key = 'your_secret_key_here'  # Important for session, change with a secure key
 
 
-# Funzione per aggiornare la struttura del database
-def update_db_structure():
-    conn = sqlite3.connect('boxing_tracker.db')
-    cursor = conn.cursor()
-
-    # Controlliamo se la colonna has_activity esiste già
-    cursor.execute("PRAGMA table_info(training_sessions)")
-    columns = [column[1] for column in cursor.fetchall()]
-
-    # Se la colonna non esiste, la aggiungiamo
-    if 'has_activity' not in columns:
-        try:
-            cursor.execute('ALTER TABLE training_sessions ADD COLUMN has_activity BOOLEAN DEFAULT 0')
-            conn.commit()
-            print("Colonna has_activity aggiunta con successo")
-        except sqlite3.Error as e:
-            print(f"Errore nell'aggiungere la colonna has_activity: {e}")
-
-    conn.close()
+# Initialize Firestore client
+def get_firestore_client():
+    return firestore.Client.from_service_account_json('credentials.json', database='boxeproject')
 
 
-# Funzione per inizializzare il database
+# Collections in Firestore - only 2 collections now
+USERS_COLLECTION = 'users'
+TRAINING_SESSIONS_COLLECTION = 'training_sessions'
+
+
+# Initialize database structure
 def init_db():
-    conn = sqlite3.connect('boxing_tracker.db')
-    cursor = conn.cursor()
-
-    # Creazione della tabella users
-    cursor.execute('''
-    CREATE TABLE IF NOT EXISTS users (
-        id INTEGER PRIMARY KEY AUTOINCREMENT,
-        username TEXT UNIQUE NOT NULL,
-        password TEXT NOT NULL,
-        email TEXT UNIQUE
-    )
-    ''')
-
-    # Creazione della tabella training_sessions
-    cursor.execute('''
-    CREATE TABLE IF NOT EXISTS training_sessions (
-        id INTEGER PRIMARY KEY AUTOINCREMENT,
-        user_id INTEGER NOT NULL,
-        date TEXT NOT NULL,
-        duration INTEGER,
-        has_activity BOOLEAN DEFAULT 0,
-        FOREIGN KEY (user_id) REFERENCES users (id)
-    )
-    ''')
-
-    # Creazione della tabella punches
-    cursor.execute('''
-    CREATE TABLE IF NOT EXISTS punches (
-        id INTEGER PRIMARY KEY AUTOINCREMENT,
-        session_id INTEGER NOT NULL,
-        timestamp TEXT NOT NULL,
-        acceleration_x REAL,
-        acceleration_y REAL,
-        acceleration_z REAL,
-        punch_intensity REAL,
-        FOREIGN KEY (session_id) REFERENCES training_sessions (id)
-    )
-    ''')
-
-    conn.commit()
-    conn.close()
+    # Firestore collections are created automatically when documents are added
+    # No need for explicit schema creation like in SQLite
+    pass
 
 
-# Inizializzazione del database
-init_db()
-update_db_structure()  # Aggiorniamo la struttura se necessario
-
-
-# Funzione per verificare se una sessione ha attività
-def session_has_activity(session_id):
-    conn = sqlite3.connect('boxing_tracker.db')
-    cursor = conn.cursor()
-    cursor.execute('SELECT COUNT(*) FROM punches WHERE session_id = ?', (session_id,))
-    count = cursor.fetchone()[0]
-    conn.close()
-    return count > 0
-
-
-# Middleware per verificare se l'utente è loggato
+# Middleware for checking if user is logged in
 def login_required(view):
     def wrapped_view(*args, **kwargs):
         if 'user_id' not in session:
@@ -119,27 +55,43 @@ def register():
         password = request.form['password']
         email = request.form['email']
 
-        # Validazione base
+        # Basic validation
         if not username or not password:
             flash('Username e password sono obbligatori!')
             return render_template('register.html')
 
-        # Hash della password
+        # Hash password
         hashed_password = generate_password_hash(password)
 
         try:
-            conn = sqlite3.connect('boxing_tracker.db')
-            cursor = conn.cursor()
-            cursor.execute(
-                'INSERT INTO users (username, password, email) VALUES (?, ?, ?)',
-                (username, hashed_password, email)
-            )
-            conn.commit()
-            conn.close()
+            db = get_firestore_client()
+            # Check if username already exists
+            users_ref = db.collection(USERS_COLLECTION)
+            username_query = users_ref.where('username', '==', username).limit(1)
+            if len(list(username_query.stream())) > 0:
+                flash('Username già esistente. Prova con credenziali diverse.')
+                return render_template('register.html')
+
+            # Check if email already exists (if provided)
+            if email:
+                email_query = users_ref.where('email', '==', email).limit(1)
+                if len(list(email_query.stream())) > 0:
+                    flash('Email già esistente. Prova con credenziali diverse.')
+                    return render_template('register.html')
+
+            # Add new user
+            new_user = {
+                'username': username,
+                'password': hashed_password,
+                'email': email
+            }
+            user_ref = users_ref.add(new_user)
+
             flash('Registrazione completata con successo! Ora puoi accedere.')
             return redirect(url_for('login'))
-        except sqlite3.IntegrityError:
-            flash('Username o email già esistente. Prova con credenziali diverse.')
+        except Exception as e:
+            print(f"Error during registration: {e}")
+            flash('Errore durante la registrazione. Riprova più tardi.')
             return render_template('register.html')
 
     return render_template('register.html')
@@ -151,19 +103,23 @@ def login():
         username = request.form['username']
         password = request.form['password']
 
-        conn = sqlite3.connect('boxing_tracker.db')
-        cursor = conn.cursor()
-        cursor.execute('SELECT id, password FROM users WHERE username = ?', (username,))
-        user = cursor.fetchone()
-        conn.close()
+        try:
+            db = get_firestore_client()
+            users_ref = db.collection(USERS_COLLECTION)
+            query = users_ref.where('username', '==', username).limit(1)
+            users = list(query.stream())
 
-        if user and check_password_hash(user[1], password):
-            session.clear()
-            session['user_id'] = user[0]
-            session['username'] = username
-            return redirect(url_for('dashboard'))
+            if users and check_password_hash(users[0].to_dict()['password'], password):
+                user_data = users[0].to_dict()
+                session.clear()
+                session['user_id'] = users[0].id
+                session['username'] = username
+                return redirect(url_for('dashboard'))
 
-        flash('Username o password non validi.')
+            flash('Username o password non validi.')
+        except Exception as e:
+            print(f"Error during login: {e}")
+            flash('Errore durante il login. Riprova più tardi.')
 
     return render_template('login.html')
 
@@ -178,55 +134,38 @@ def logout():
 @app.route('/dashboard')
 @login_required
 def dashboard():
-    # Recuperare statistiche generali dell'utente
+    # Get general user statistics
     user_id = session.get('user_id')
-    conn = sqlite3.connect('boxing_tracker.db')
-    conn.row_factory = sqlite3.Row
-    cursor = conn.cursor()
+    db = get_firestore_client()
 
-    try:
-        # Prova a usare la colonna has_activity
-        cursor.execute('SELECT COUNT(*) as session_count FROM training_sessions WHERE user_id = ? AND has_activity = 1',
-                       (user_id,))
-    except sqlite3.OperationalError:
-        # Se la colonna non esiste, utilizziamo una JOIN con punches
-        cursor.execute('''
-            SELECT COUNT(DISTINCT t.id) as session_count 
-            FROM training_sessions t 
-            JOIN punches p ON t.id = p.session_id 
-            WHERE t.user_id = ?
-            ''', (user_id,))
+    # Get all user sessions
+    sessions_ref = db.collection(TRAINING_SESSIONS_COLLECTION)
+    sessions_query = sessions_ref.where('user_id', '==', user_id)
+    session_list = list(sessions_query.stream())
 
-    session_count = cursor.fetchone()['session_count']
+    # Calculate stats
+    session_count = len(session_list)
+    total_punches = 0
+    total_intensity = 0
+    intensity_count = 0
 
-    # Conteggio pugni totali
-    cursor.execute('''
-        SELECT COUNT(*) as punch_count 
-        FROM punches p 
-        JOIN training_sessions t ON p.session_id = t.id 
-        WHERE t.user_id = ?
-    ''', (user_id,))
-    punch_count = cursor.fetchone()['punch_count']
+    for sess in session_list:
+        session_data = sess.to_dict()
+        punch_count = len(session_data.get('punches', []))
+        total_punches += punch_count
+        if session_data.get('avg_intensity', 0) > 0:
+            total_intensity += session_data.get('avg_intensity', 0)
+            intensity_count += 1
 
-    # Intensità media
-    cursor.execute('''
-        SELECT AVG(p.punch_intensity) as avg_intensity 
-        FROM punches p 
-        JOIN training_sessions t ON p.session_id = t.id 
-        WHERE t.user_id = ?
-    ''', (user_id,))
-    avg_intensity = cursor.fetchone()['avg_intensity']
-    if avg_intensity is None:
-        avg_intensity = 0
-    else:
-        avg_intensity = round(avg_intensity, 2)
-
-    conn.close()
+    # Calculate average intensity across all sessions
+    avg_intensity = 0
+    if intensity_count > 0:
+        avg_intensity = round(total_intensity / intensity_count, 2)
 
     return render_template('dashboard.html',
                            username=session.get('username'),
                            session_count=session_count,
-                           punch_count=punch_count,
+                           punch_count=total_punches,
                            avg_intensity=avg_intensity)
 
 
@@ -234,49 +173,31 @@ def dashboard():
 @login_required
 def stats():
     user_id = session.get('user_id')
+    db = get_firestore_client()
 
-    conn = sqlite3.connect('boxing_tracker.db')
-    conn.row_factory = sqlite3.Row
-    cursor = conn.cursor()
-
-    # Recupera le sessioni di allenamento dell'utente (solo quelle con attività)
-    try:
-        cursor.execute('''
-            SELECT id, date, duration FROM training_sessions 
-            WHERE user_id = ? AND has_activity = 1 
-            ORDER BY date DESC
-        ''', (user_id,))
-    except sqlite3.OperationalError:
-        # Se la colonna has_activity non esiste, selezioniamo le sessioni che hanno punches
-        cursor.execute('''
-            SELECT DISTINCT t.id, t.date, t.duration 
-            FROM training_sessions t 
-            JOIN punches p ON t.id = p.session_id 
-            WHERE t.user_id = ? 
-            ORDER BY t.date DESC
-        ''', (user_id,))
-
-    sessions = cursor.fetchall()
+    # Get user's training sessions
+    sessions_ref = db.collection(TRAINING_SESSIONS_COLLECTION)
+    sessions_query = sessions_ref.where('user_id', '==', user_id)
+    sessions = list(sessions_query.stream())
 
     sessions_data = []
     for sess in sessions:
-        # Per ogni sessione, recupera il conteggio dei pugni e l'intensità media
-        cursor.execute('''
-            SELECT COUNT(*) as punch_count, AVG(punch_intensity) as avg_intensity 
-            FROM punches 
-            WHERE session_id = ?
-        ''', (sess['id'],))
-        punch_stats = cursor.fetchone()
+        session_data = sess.to_dict()
+        punches = session_data.get('punches', [])
+        # Skip sessions with no punches
+        if len(punches) == 0:
+            continue
 
         sessions_data.append({
-            'id': sess['id'],
-            'date': sess['date'],
-            'duration': sess['duration'],
-            'punch_count': punch_stats['punch_count'],
-            'avg_intensity': round(punch_stats['avg_intensity'], 2) if punch_stats['avg_intensity'] else 0
+            'id': sess.id,
+            'date': session_data.get('date', ''),
+            'duration': session_data.get('duration', 0),
+            'punch_count': len(punches),
+            'avg_intensity': session_data.get('avg_intensity', 0)
         })
 
-    conn.close()
+    # Sort by date (most recent first)
+    sessions_data.sort(key=lambda x: x['date'], reverse=True)
 
     return render_template('stats.html', sessions=sessions_data, username=session.get('username'))
 
@@ -288,30 +209,25 @@ def start_session():
     now = datetime.now()
     date_str = now.strftime("%Y-%m-%d %H:%M:%S")
 
-    conn = sqlite3.connect('boxing_tracker.db')
-    cursor = conn.cursor()
+    db = get_firestore_client()
+    sessions_ref = db.collection(TRAINING_SESSIONS_COLLECTION)
 
-    try:
-        # Prova a includere has_activity
-        cursor.execute(
-            'INSERT INTO training_sessions (user_id, date, duration, has_activity) VALUES (?, ?, ?, ?)',
-            (user_id, date_str, 0, 0)  # Inizia con has_activity = 0
-        )
-    except sqlite3.OperationalError:
-        # Se has_activity non esiste, inseriamo senza quella colonna
-        cursor.execute(
-            'INSERT INTO training_sessions (user_id, date, duration) VALUES (?, ?, ?)',
-            (user_id, date_str, 0)
-        )
+    # Order fields as requested: user_id, date, avg_intensity, duration, punches
+    new_session = {
+        'user_id': user_id,
+        'date': date_str,
+        'avg_intensity': 0,
+        'duration': 0,
+        'punches': []  # Store punch data directly in the session
+    }
 
-    session_id = cursor.lastrowid
-    conn.commit()
-    conn.close()
+    session_ref = sessions_ref.add(new_session)
+    session_id = session_ref[1].id
 
     session['training_session_id'] = session_id
     session['training_start_time'] = date_str
 
-    # Reindirizza alla nuova pagina di allenamento attivo
+    # Redirect to the new active training page
     return redirect(url_for('active_training'))
 
 
@@ -334,45 +250,36 @@ def active_training():
 def end_session():
     if 'training_session_id' in session:
         session_id = session['training_session_id']
+        db = get_firestore_client()
 
-        # Calcola la durata della sessione
-        conn = sqlite3.connect('boxing_tracker.db')
-        cursor = conn.cursor()
+        # Get session data
+        session_ref = db.collection(TRAINING_SESSIONS_COLLECTION).document(session_id)
+        session_data = session_ref.get().to_dict()
 
-        # Ottiene la data di inizio sessione dal database
-        cursor.execute('SELECT date FROM training_sessions WHERE id = ?', (session_id,))
-        start_time_str = cursor.fetchone()[0]
-        start_time = datetime.strptime(start_time_str, "%Y-%m-%d %H:%M:%S")
+        # If there are no punches, delete this session
+        if len(session_data.get('punches', [])) == 0:
+            session_ref.delete()
+            flash('Sessione terminata. Nessun dato salvato poiché non sono stati registrati pugni.')
+        else:
+            # Calculate duration
+            start_time_str = session_data.get('date')
+            start_time = datetime.strptime(start_time_str, "%Y-%m-%d %H:%M:%S")
+            end_time = datetime.now()
+            duration_seconds = int((end_time - start_time).total_seconds())
 
-        # Calcola la durata in secondi
-        end_time = datetime.now()
-        duration = int((end_time - start_time).total_seconds())
+            # Convert seconds to minutes for display purposes
+            duration_minutes = round(duration_seconds / 60, 2)
 
-        # Verifica se ci sono state attività (pugni) in questa sessione
-        cursor.execute('SELECT COUNT(*) FROM punches WHERE session_id = ?', (session_id,))
-        punch_count = cursor.fetchone()[0]
+            # Update session with duration (store as minutes, not seconds)
+            session_ref.update({
+                'duration': duration_minutes
+            })
 
-        try:
-            # Aggiorna la durata e imposta has_activity = 1 se ci sono stati pugni
-            cursor.execute(
-                'UPDATE training_sessions SET duration = ?, has_activity = ? WHERE id = ?',
-                (duration, 1 if punch_count > 0 else 0, session_id)
-            )
-        except sqlite3.OperationalError:
-            # Se has_activity non esiste, aggiorniamo solo la durata
-            cursor.execute(
-                'UPDATE training_sessions SET duration = ? WHERE id = ?',
-                (duration, session_id)
-            )
+            flash('Allenamento terminato e salvato con successo!')
 
-        conn.commit()
-        conn.close()
-
-        # Rimuovi le informazioni sulla sessione dalla sessione utente
+        # Remove session info from user session
         session.pop('training_session_id', None)
         session.pop('training_start_time', None)
-
-        flash('Allenamento terminato e salvato con successo!')
 
     return redirect(url_for('dashboard'))
 
@@ -386,16 +293,21 @@ def upload_data_buffer():
     try:
         data = json.loads(request.values['data'])
         session_id = session['training_session_id']
+        db = get_firestore_client()
 
-        conn = sqlite3.connect('boxing_tracker.db')
-        cursor = conn.cursor()
+        # Get session reference
+        session_ref = db.collection(TRAINING_SESSIONS_COLLECTION).document(session_id)
+        session_data = session_ref.get().to_dict()
 
-        # Prova a impostare has_activity = 1
-        try:
-            cursor.execute('UPDATE training_sessions SET has_activity = 1 WHERE id = ?', (session_id,))
-        except sqlite3.OperationalError:
-            # Se has_activity non esiste, continuiamo senza errori
-            pass
+        # Current data
+        punches = session_data.get('punches', [])
+        current_punch_count = len(punches)
+        current_total_intensity = session_data.get('avg_intensity',
+                                                   0) * current_punch_count if current_punch_count > 0 else 0
+
+        # Process new punches
+        new_punches = []
+        total_new_intensity = 0
 
         for point in data:
             now = datetime.now().strftime("%Y-%m-%d %H:%M:%S.%f")
@@ -403,20 +315,37 @@ def upload_data_buffer():
             y = point.get('y', 0)
             z = point.get('z', 0)
 
-            # Calcolo semplice dell'intensità del pugno (modulo dell'accelerazione)
+            # Calculate punch intensity (magnitude of acceleration)
             intensity = (x ** 2 + y ** 2 + z ** 2) ** 0.5
+            total_new_intensity += intensity
 
-            cursor.execute(
-                'INSERT INTO punches (session_id, timestamp, acceleration_x, acceleration_y, acceleration_z, punch_intensity) VALUES (?, ?, ?, ?, ?, ?)',
-                (session_id, now, x, y, z, intensity)
-            )
+            new_punch = {
+                'timestamp': now,
+                'acceleration_x': x,
+                'acceleration_y': y,
+                'acceleration_z': z,
+                'intensity': intensity
+            }
+            new_punches.append(new_punch)
 
-        conn.commit()
-        conn.close()
+        # Update punch statistics
+        new_punch_count = len(new_punches)
+        total_punches = current_punch_count + new_punch_count
+
+        # Calculate new average intensity
+        total_intensity = current_total_intensity + total_new_intensity
+        avg_intensity = round(total_intensity / total_punches, 2) if total_punches > 0 else 0
+
+        # Update session document
+        session_ref.update({
+            'avg_intensity': avg_intensity,
+            'punches': firestore.ArrayUnion(new_punches)
+        })
+
         return 'Data saved successfully', 200
     except Exception as e:
         print(f"Error saving data: {e}")
-        return 'Error saving data', 500
+        return f'Error saving data: {str(e)}', 500
 
 
 @app.route('/upload_data', methods=['POST'])
@@ -432,87 +361,79 @@ def upload_data():
         session_id = session['training_session_id']
         now = datetime.now().strftime("%Y-%m-%d %H:%M:%S.%f")
 
-        # Calcolo semplice dell'intensità del pugno
+        # Calculate punch intensity
         intensity = (i ** 2 + j ** 2 + k ** 2) ** 0.5
 
-        conn = sqlite3.connect('boxing_tracker.db')
-        cursor = conn.cursor()
+        db = get_firestore_client()
+        session_ref = db.collection(TRAINING_SESSIONS_COLLECTION).document(session_id)
+        session_data = session_ref.get().to_dict()
 
-        # Prova a impostare has_activity = 1
-        try:
-            cursor.execute('UPDATE training_sessions SET has_activity = 1 WHERE id = ?', (session_id,))
-        except sqlite3.OperationalError:
-            # Se has_activity non esiste, continuiamo senza errori
-            pass
+        # Current data
+        punches = session_data.get('punches', [])
+        current_punch_count = len(punches)
+        current_total_intensity = session_data.get('avg_intensity',
+                                                   0) * current_punch_count if current_punch_count > 0 else 0
 
-        cursor.execute(
-            'INSERT INTO punches (session_id, timestamp, acceleration_x, acceleration_y, acceleration_z, punch_intensity) VALUES (?, ?, ?, ?, ?, ?)',
-            (session_id, now, i, j, k, intensity)
-        )
-        conn.commit()
-        conn.close()
+        # Add new punch
+        new_punch = {
+            'timestamp': now,
+            'acceleration_x': i,
+            'acceleration_y': j,
+            'acceleration_z': k,
+            'intensity': intensity
+        }
+
+        # Update punch statistics
+        total_punches = current_punch_count + 1
+        total_intensity = current_total_intensity + intensity
+        avg_intensity = round(total_intensity / total_punches, 2)
+
+        # Update session document
+        session_ref.update({
+            'avg_intensity': avg_intensity,
+            'punches': firestore.ArrayUnion([new_punch])
+        })
 
         return 'Data saved successfully', 200
     except Exception as e:
         print(f"Error saving data: {e}")
-        return 'Error saving data', 500
+        return f'Error saving data: {str(e)}', 500
 
 
 @app.route('/training')
 @login_required
 def training():
     user_id = session.get('user_id')
+    db = get_firestore_client()
 
-    # Recupera i dati di allenamento per visualizzare i progressi
-    conn = sqlite3.connect('boxing_tracker.db')
-    conn.row_factory = sqlite3.Row
-    cursor = conn.cursor()
+    # Get user's training sessions
+    sessions_ref = db.collection(TRAINING_SESSIONS_COLLECTION)
+    sessions_query = sessions_ref.where('user_id', '==', user_id)
+    sessions = list(sessions_query.stream())
 
-    # Recupera le sessioni di allenamento dell'utente (solo quelle con attività)
-    try:
-        cursor.execute('''
-            SELECT id, date, duration FROM training_sessions 
-            WHERE user_id = ? AND has_activity = 1 
-            ORDER BY date DESC
-        ''', (user_id,))
-    except sqlite3.OperationalError:
-        # Se la colonna has_activity non esiste, selezioniamo le sessioni che hanno punches
-        cursor.execute('''
-            SELECT DISTINCT t.id, t.date, t.duration 
-            FROM training_sessions t 
-            JOIN punches p ON t.id = p.session_id 
-            WHERE t.user_id = ? 
-            ORDER BY t.date DESC
-        ''', (user_id,))
-
-    sessions = cursor.fetchall()
-
-    # Prepara i dati nel formato necessario per i grafici
     sessions_data = []
     for sess in sessions:
-        # Per ogni sessione, recupera il conteggio dei pugni e l'intensità media
-        cursor.execute('''
-            SELECT COUNT(*) as punch_count, AVG(punch_intensity) as avg_intensity 
-            FROM punches 
-            WHERE session_id = ?
-        ''', (sess['id'],))
-        punch_stats = cursor.fetchone()
+        session_data = sess.to_dict()
+        punches = session_data.get('punches', [])
+
+        # Skip sessions with no punches
+        if len(punches) == 0:
+            continue
 
         sessions_data.append({
-            'id': sess['id'],
-            'date': sess['date'],
-            'duration': sess['duration'],
-            'punch_count': punch_stats['punch_count'],
-            'avg_intensity': round(punch_stats['avg_intensity'], 2) if punch_stats['avg_intensity'] else 0
+            'id': sess.id,
+            'date': session_data.get('date', ''),
+            'duration': session_data.get('duration', 0),
+            'punch_count': len(punches),
+            'avg_intensity': session_data.get('avg_intensity', 0)
         })
 
-    conn.close()
-    # Aggiungi prima del return
-    print(f"Sessions data for training: {sessions_data}")
-    return render_template('training.html',
-                          username=session.get('username'),
+    # Sort by date (most recent first)
+    sessions_data.sort(key=lambda x: x['date'], reverse=True)
 
-                          sessions=sessions_data)  # Passa i dati delle sessioni al template
+    return render_template('training.html',
+                           username=session.get('username'),
+                           sessions=sessions_data)
 
 
 if __name__ == '__main__':

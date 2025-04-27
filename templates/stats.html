@@ -22,12 +22,20 @@
         h1 {
             color: #333;
             text-align: center;
+            margin-bottom: 15px;
         }
         .header {
             display: flex;
             justify-content: space-between;
             align-items: center;
             margin-bottom: 20px;
+            flex-wrap: wrap;
+        }
+        .user-controls {
+            display: flex;
+            align-items: center;
+            gap: 10px;
+            flex-wrap: wrap;
         }
         .session-card {
             background-color: #f9f9f9;
@@ -71,6 +79,49 @@
             color: white;
             padding: 10px 15px;
             border-radius: 3px;
+            display: inline-block;
+            margin-top: 5px;
+        }
+
+        /* Media query per schermi piccoli come smartphone */
+        @media screen and (max-width: 600px) {
+            .header {
+                flex-direction: column;
+                align-items: flex-start;
+            }
+
+            h1 {
+                width: 100%;
+                margin-bottom: 15px;
+            }
+
+            .user-controls {
+                width: 100%;
+                flex-direction: column;
+                align-items: flex-start;
+                margin-top: 10px;
+            }
+
+            .user-controls span {
+                margin-bottom: 10px;
+            }
+
+            .nav-link {
+                display: inline-block;
+                margin-right: 10px;
+                margin-bottom: 5px;
+            }
+
+            .session-details {
+                grid-template-columns: 1fr;
+            }
+        }
+
+        /* Media query per schermi medi come tablet */
+        @media screen and (min-width: 601px) and (max-width: 768px) {
+            .session-details {
+                grid-template-columns: repeat(2, 1fr);
+            }
         }
     </style>
 </head>
@@ -78,10 +129,12 @@
     <div class="container">
         <div class="header">
             <h1>Statistiche Allenamenti</h1>
-            <div>
+            <div class="user-controls">
                 <span>Benvenuto, {{ username }}</span>
-                <a href="{{ url_for('dashboard') }}" class="nav-link">Dashboard</a>
-                <a href="{{ url_for('logout') }}" class="nav-link">Logout</a>
+                <div>
+                    <a href="{{ url_for('dashboard') }}" class="nav-link">Dashboard</a>
+                    <a href="{{ url_for('logout') }}" class="nav-link">Logout</a>
+                </div>
             </div>
         </div>
 
@@ -91,7 +144,13 @@
                     <div class="session-title">Sessione del {{ session.date }}</div>
                     <div class="session-details">
                         <div class="stat-box">
-                            <div class="stat-value">{{ session.duration }} min</div>
+                            <div class="stat-value">
+                                {% if session.duration < 1 %}
+                                    {{ (session.duration * 60)|int }} sec
+                                {% else %}
+                                    {{ session.duration|round(1) }} min
+                                {% endif %}
+                            </div>
                             <div class="stat-label">Durata</div>
                         </div>
                         <div class="stat-box">
@@ -99,7 +158,7 @@
                             <div class="stat-label">Pugni totali</div>
                         </div>
                         <div class="stat-box">
-                            <div class="stat-value">{{ session.avg_intensity }}</div>
+                            <div class="stat-value">{{ session.avg_intensity|round(1) }}</div>
                             <div class="stat-label">Intensità media</div>
                         </div>
                     </div>
@@ -108,7 +167,7 @@
         {% else %}
             <div class="no-sessions">
                 <p>Non hai ancora completato sessioni di allenamento.</p>
-                <a href="{{ url_for('training') }}" class="nav-link">Inizia un allenamento</a>
+                <a href="{{ url_for('active_training') }}" class="nav-link">Inizia un allenamento</a>
             </div>
         {% endif %}
     </div>
