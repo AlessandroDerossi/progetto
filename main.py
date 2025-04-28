@@ -260,6 +260,12 @@ def end_session():
         if len(session_data.get('punches', [])) == 0:
             session_ref.delete()
             flash('Sessione terminata. Nessun dato salvato poiché non sono stati registrati pugni.')
+
+            # Remove session info from user session
+            session.pop('training_session_id', None)
+            session.pop('training_start_time', None)
+
+            return json.dumps({'status': 'deleted', 'message': 'Sessione eliminata perché non conteneva pugni'}), 200
         else:
             # Calculate duration
             start_time_str = session_data.get('date')
@@ -277,11 +283,13 @@ def end_session():
 
             flash('Allenamento terminato e salvato con successo!')
 
-        # Remove session info from user session
-        session.pop('training_session_id', None)
-        session.pop('training_start_time', None)
+            # Remove session info from user session
+            session.pop('training_session_id', None)
+            session.pop('training_start_time', None)
 
-    return redirect(url_for('dashboard'))
+            return json.dumps({'status': 'saved', 'message': 'Allenamento salvato con successo'}), 200
+
+    return json.dumps({'status': 'error', 'message': 'Nessuna sessione attiva'}), 400
 
 
 @app.route('/upload_data_buffer', methods=['POST'])

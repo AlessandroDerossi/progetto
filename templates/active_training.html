@@ -191,7 +191,7 @@
             <div class="col-12">
                 <div class="card">
                     <div class="card-body">
-                        <h5 class="card-title">Debug Info</h5>
+                        <h5 class="card-title">Info</h5>
                         <div id="debugInfo">Pronto per iniziare...</div>
                     </div>
                 </div>
@@ -208,293 +208,397 @@
     <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0-alpha1/dist/js/bootstrap.bundle.min.js"></script>
     <script>
         document.addEventListener('DOMContentLoaded', function() {
-            const startButton = document.getElementById('startButton');
-            const resumeButton = document.getElementById('resumeButton');
-            const pauseButton = document.getElementById('pauseButton');
-            const stopButton = document.getElementById('stopButton');
-            const timerDisplay = document.getElementById('timer');
-            const punchCounter = document.getElementById('punchCounter');
-            const avgIntensity = document.getElementById('avgIntensity');
-            const debugInfo = document.getElementById('debugInfo');
-            const punchAnimation = document.getElementById('punchAnimation');
+    const startButton = document.getElementById('startButton');
+    const resumeButton = document.getElementById('resumeButton');
+    const pauseButton = document.getElementById('pauseButton');
+    const stopButton = document.getElementById('stopButton');
+    const timerDisplay = document.getElementById('timer');
+    const punchCounter = document.getElementById('punchCounter');
+    const avgIntensity = document.getElementById('avgIntensity');
+    const debugInfo = document.getElementById('debugInfo');
+    const punchAnimation = document.getElementById('punchAnimation');
 
-            let timer;
-            let seconds = 0;
-            let isRunning = false;
-            let punches = 0;
-            let totalIntensity = 0;
-            let hasPunches = false;
+    let timer;
+    let seconds = 0;
+    let isRunning = false;
+    let punches = 0;
+    let totalIntensity = 0;
+    let hasPunches = false;
 
-            // Accelerometer variables
-            let sensor = null;
-            let dataBuffer = [];
-            let bufferTimer = null;
-            let lastPunchTime = 0;
-            let punchThreshold = 15; // Initial threshold for punch detection
+    // Accelerometer variables
+    let sensor = null;
+    let dataBuffer = [];
+    let bufferTimer = null;
+    let lastPunchTime = 0;
+    let punchThreshold = 15; // Initial threshold for punch detection
+    let baselineAcceleration = 10; // Valore base per calibrare il rilevamento
+    let calibrationSamples = []; // Per calibrare l'accelerometro
+    let isCalibrating = false;
+    let minMagnitudeBetweenPunches = 5; // Minima intensità tra pugni per distinguerli
+    let isMagBelowMinRequired = false; // Flag per verificare che l'intensità sia scesa tra i pugni
 
-            // Check if accelerometer is available
-            function checkAccelerometerSupport() {
-                if ('LinearAccelerationSensor' in window) {
-                    try {
-                        sensor = new LinearAccelerationSensor({ frequency: 60 });
-                        debugInfo.textContent = "Accelerometro rilevato!";
-                        return true;
-                    } catch (error) {
-                        debugInfo.textContent = "Errore nell'inizializzazione dell'accelerometro: " + error;
-                        return false;
-                    }
-                } else {
-                    debugInfo.textContent = "Il tuo dispositivo o browser non supporta l'accelerometro. Provane un altro.";
-                    return false;
+    // Messaggi in italiano per lo stato dell'accelerometro
+    const MESSAGES = {
+        NO_ACCELEROMETER: "Il tuo dispositivo non dispone di accelerometro. Non sarà possibile rilevare i pugni.",
+        INIT_ERROR: "Errore nell'inizializzazione dell'accelerometro. Verifica le autorizzazioni del browser.",
+        PERMISSION_DENIED: "Permesso negato per l'accelerometro. Per favore, abilita l'accesso nelle impostazioni del browser.",
+        READY: "Accelerometro pronto. Premi 'Inizia' per cominciare l'allenamento.",
+        CALIBRATING: "Calibrazione in corso... Tieni fermo il dispositivo per un momento.",
+        CALIBRATION_COMPLETE: "Calibrazione completata. Accelerometro pronto all'uso.",
+        RUNNING: "Accelerometro attivo. Allenamento in corso...",
+        PAUSED: "Allenamento in pausa. Premi 'Riprendi' per continuare.",
+        PUNCH_DETECTED: "Pugno rilevato! Intensità: ",
+        ERROR: "Errore del sensore: ",
+        DATA_SENT: "Dati inviati al server: ",
+        NO_PUNCHES: "Nessun pugno rilevato. L'allenamento non verrà salvato."
+    };
+
+    // Check if accelerometer is available
+    function checkAccelerometerSupport() {
+        if ('LinearAccelerationSensor' in window) {
+            try {
+                sensor = new LinearAccelerationSensor({ frequency: 60 });
+                debugInfo.textContent = MESSAGES.READY;
+                return true;
+            } catch (error) {
+                debugInfo.textContent = MESSAGES.INIT_ERROR + error;
+                return false;
+            }
+        } else {
+            debugInfo.textContent = MESSAGES.NO_ACCELEROMETER;
+            return false;
+        }
+    }
+
+    // Calibration function
+    function calibrateAccelerometer() {
+        isCalibrating = true;
+        calibrationSamples = [];
+        debugInfo.textContent = MESSAGES.CALIBRATING;
+
+        // Collect samples for 2 seconds
+        setTimeout(() => {
+            if (calibrationSamples.length > 0) {
+                // Calculate average baseline
+                let sum = 0;
+                for (let sample of calibrationSamples) {
+                    sum += sample;
                 }
+                baselineAcceleration = sum / calibrationSamples.length;
+
+                // Set punch threshold above baseline
+                punchThreshold = baselineAcceleration + 12;
+
+                isCalibrating = false;
+                debugInfo.textContent = MESSAGES.CALIBRATION_COMPLETE +
+                    ` (Soglia pugni: ${punchThreshold.toFixed(2)})`;
+            } else {
+                debugInfo.textContent = "Calibrazione fallita. Usando valori di default.";
+                punchThreshold = 15;
+            }
+        }, 2000);
+    }
+
+    // Initialize accelerometer and start capturing data
+    function initAccelerometer() {
+        if (!checkAccelerometerSupport()) {
+            alert(MESSAGES.NO_ACCELEROMETER);
+            return false;
+        }
+
+        // Handle accelerometer readings
+        sensor.onreading = function() {
+            if (isCalibrating) {
+                // Collect calibration samples
+                const magnitude = Math.sqrt(sensor.x*sensor.x + sensor.y*sensor.y + sensor.z*sensor.z);
+                calibrationSamples.push(magnitude);
+                return;
             }
 
-            // Initialize accelerometer and start capturing data
-            function initAccelerometer() {
-                if (!checkAccelerometerSupport()) {
-                    alert("Il tuo dispositivo non supporta l'accelerometro. Non sarà possibile rilevare i pugni.");
-                    return false;
-                }
+            if (!isRunning) return;
 
-                // Handle accelerometer readings
-                sensor.onreading = function() {
-                    if (!isRunning) return;
+            const x = sensor.x;
+            const y = sensor.y;
+            const z = sensor.z;
 
-                    const x = sensor.x;
-                    const y = sensor.y;
-                    const z = sensor.z;
+            // Calculate magnitude of acceleration vector
+            const magnitude = Math.sqrt(x*x + y*y + z*z);
 
-                    // Calculate magnitude of acceleration vector
-                    const magnitude = Math.sqrt(x*x + y*y + z*z);
-
-                    // Add to buffer
-                    dataBuffer.push({
-                        x: x,
-                        y: y,
-                        z: z,
-                        magnitude: magnitude,
-                        timestamp: Date.now()
-                    });
-
-                    // Simple punch detection
-                    detectPunch(x, y, z, magnitude);
-                };
-
-                sensor.onerror = function(event) {
-                    debugInfo.textContent = `Errore sensore: ${event.error.name}, ${event.error.message}`;
-                    console.error(event.error);
-                };
-
-                // Start the sensor
-                try {
-                    sensor.start();
-                    debugInfo.textContent = "Accelerometro avviato e funzionante";
-
-                    // Set up buffer upload
-                    bufferTimer = setInterval(uploadDataBuffer, 2000); // Send data every 2 seconds
-
-                    return true;
-                } catch (error) {
-                    debugInfo.textContent = "Errore avvio accelerometro: " + error;
-                    console.error("Couldn't start the sensor", error);
-                    return false;
-                }
-            }
-
-            // Simple punch detection algorithm
-            function detectPunch(x, y, z, magnitude) {
-                const now = Date.now();
-
-                // Ignore if it's too soon after the last punch (prevent double counting)
-                if (now - lastPunchTime < 500) {
-                    return;
-                }
-
-                // Basic punch detection - if acceleration exceeds threshold
-                if (magnitude > punchThreshold) {
-                    // Record this punch
-                    lastPunchTime = now;
-                    punches++;
-                    hasPunches = true;
-
-                    // Update intensity calculation
-                    totalIntensity += magnitude;
-                    const currentAvgIntensity = (totalIntensity / punches).toFixed(2);
-
-                    // Update UI
-                    punchCounter.textContent = punches;
-                    avgIntensity.textContent = currentAvgIntensity;
-
-                    // Show punch animation
-                    showPunchAnimation();
-
-                    // Debug info
-                    debugInfo.textContent = `Pugno rilevato! X: ${x.toFixed(2)}, Y: ${y.toFixed(2)}, Z: ${z.toFixed(2)}, Intensità: ${magnitude.toFixed(2)}`;
-
-                    // Send this punch immediately for better responsiveness
-                    const punchData = {
-                        i: x,
-                        j: y,
-                        k: z
-                    };
-
-                    fetch('{{ url_for("upload_data") }}', {
-                        method: 'POST',
-                        headers: {
-                            'Content-Type': 'application/x-www-form-urlencoded',
-                        },
-                        body: `i=${punchData.i}&j=${punchData.j}&k=${punchData.k}`
-                    })
-                    .catch(error => console.error('Error sending punch data:', error));
-                }
-            }
-
-            // Show punch animation
-            function showPunchAnimation() {
-                punchAnimation.style.display = 'block';
-                punchAnimation.style.transform = 'scale(1.5)';
-
-                setTimeout(() => {
-                    punchAnimation.style.transform = 'scale(1)';
-                    setTimeout(() => {
-                        punchAnimation.style.display = 'none';
-                    }, 200);
-                }, 200);
-            }
-
-            // Upload the buffer of data points
-            function uploadDataBuffer() {
-                if (dataBuffer.length === 0) return;
-
-                fetch('{{ url_for("upload_data_buffer") }}', {
-                    method: 'POST',
-                    headers: {
-                        'Content-Type': 'application/x-www-form-urlencoded',
-                    },
-                    body: `data=${JSON.stringify(dataBuffer)}`
-                })
-                .then(response => {
-                    if (response.ok) {
-                        console.log(`Uploaded ${dataBuffer.length} data points`);
-                        dataBuffer = []; // Clear buffer after successful upload
-                    }
-                })
-                .catch(error => console.error('Error uploading data buffer:', error));
-            }
-
-            // Timer function
-            function updateTimer() {
-                seconds++;
-                const hours = Math.floor(seconds / 3600);
-                const minutes = Math.floor((seconds % 3600) / 60);
-                const secs = seconds % 60;
-
-                timerDisplay.textContent =
-                    `${hours.toString().padStart(2, '0')}:${minutes.toString().padStart(2, '0')}:${secs.toString().padStart(2, '0')}`;
-            }
-
-            // Event listeners for buttons
-            startButton.addEventListener('click', function() {
-                if (!isRunning) {
-                    if (initAccelerometer()) {
-                        isRunning = true;
-                        timer = setInterval(updateTimer, 1000);
-
-                        startButton.style.display = 'none';
-                        resumeButton.style.display = 'none';
-                        pauseButton.disabled = false;
-                        stopButton.disabled = false;
-                    } else {
-                        alert("Impossibile avviare l'accelerometro. Controlla le autorizzazioni del browser.");
-                    }
-                }
-            });
-
-            resumeButton.addEventListener('click', function() {
-                if (!isRunning) {
-                    isRunning = true;
-                    timer = setInterval(updateTimer, 1000);
-
-                    if (sensor && sensor.activated) {
-                        // Sensor is already active, just resume processing readings
-                    } else {
-                        // Try to restart the sensor
-                        initAccelerometer();
-                    }
-
-                    resumeButton.style.display = 'none';
-                    pauseButton.disabled = false;
-                }
-            });
-
-            pauseButton.addEventListener('click', function() {
-                if (isRunning) {
-                    isRunning = false;
-                    clearInterval(timer);
-
-                    // We don't stop the sensor, just stop processing readings
-
-                    resumeButton.style.display = 'inline-block';
-                    pauseButton.disabled = true;
-
-                    // Upload any remaining data
-                    uploadDataBuffer();
-                }
-            });
-
-            stopButton.addEventListener('click', function() {
-                isRunning = false;
-                clearInterval(timer);
-
-                if (sensor) {
-                    try {
-                        sensor.stop();
-                    } catch (e) {
-                        console.error("Error stopping sensor:", e);
-                    }
-                }
-
-                if (bufferTimer) {
-                    clearInterval(bufferTimer);
-                }
-
-                // Upload any remaining data
-                uploadDataBuffer();
-
-                // Check if any punches were recorded
-                if (!hasPunches) {
-                    alert("Allenamento terminato senza attività registrate. Non verrà salvato nel conteggio.");
-                    window.location.href = '{{ url_for("dashboard") }}';
-                    return;
-                }
-
-                // End the session
-                fetch('{{ url_for("end_session") }}', {
-                    method: 'POST'
-                })
-                .then(response => {
-                    if (response.ok) {
-                        window.location.href = '{{ url_for("dashboard") }}';
-                    }
-                })
-                .catch(error => console.error('Error ending session:', error));
-            });
-
-            // Check for accelerometer permission
-            if (navigator.permissions) {
-                navigator.permissions.query({ name: 'accelerometer' })
-                .then(result => {
-                    debugInfo.textContent = `Stato permesso accelerometro: ${result.state}`;
-                    if (result.state === 'denied') {
-                        alert("Permesso accelerometro negato. Abilita i permessi nelle impostazioni del browser.");
-                    }
-                })
-                .catch(error => {
-                    console.error("Error checking permission:", error);
-                    debugInfo.textContent = "Impossibile verificare i permessi dell'accelerometro";
+            // Solo i dati significativi vanno nel buffer (sopra una soglia minima)
+            if (magnitude > baselineAcceleration/2) {
+                // Add to buffer
+                dataBuffer.push({
+                    x: x,
+                    y: y,
+                    z: z,
+                    magnitude: magnitude,
+                    timestamp: Date.now()
                 });
             }
+
+            // Check if magnitude dropped below minimum to reset punch detection
+            if (magnitude < minMagnitudeBetweenPunches) {
+                isMagBelowMinRequired = true;
+            }
+
+            // Smart punch detection
+            if (isRunning) {
+                detectPunch(x, y, z, magnitude);
+            }
+        };
+
+        sensor.onerror = function(event) {
+            debugInfo.textContent = MESSAGES.ERROR + `${event.error.name}, ${event.error.message}`;
+            console.error(event.error);
+        };
+
+        // Start the sensor
+        try {
+            sensor.start();
+            debugInfo.textContent = MESSAGES.RUNNING;
+
+            // Calibrate after startup
+            calibrateAccelerometer();
+
+            // Set up buffer upload - frequency ridotta a ogni 5 secondi
+            bufferTimer = setInterval(uploadDataBuffer, 5000);
+
+            return true;
+        } catch (error) {
+            debugInfo.textContent = MESSAGES.INIT_ERROR + error;
+            console.error("Couldn't start the sensor", error);
+            return false;
+        }
+    }
+
+    // Improved punch detection algorithm
+    function detectPunch(x, y, z, magnitude) {
+        const now = Date.now();
+
+        // Prevent double counting and ensure there was a "quiet" period between punches
+        if (now - lastPunchTime < 500 || !isMagBelowMinRequired) {
+            return;
+        }
+
+        // Better punch detection with dynamic threshold
+        if (magnitude > punchThreshold) {
+            // Record this punch
+            lastPunchTime = now;
+            punches++;
+            hasPunches = true;
+            isMagBelowMinRequired = false; // Reset to prevent detecting multiple punches in sequence
+
+            // Update intensity calculation (use actual magnitude not just threshold)
+            const punchIntensity = magnitude;
+            totalIntensity += punchIntensity;
+            const currentAvgIntensity = (totalIntensity / punches).toFixed(2);
+
+            // Update UI
+            punchCounter.textContent = punches;
+            avgIntensity.textContent = currentAvgIntensity;
+
+            // Show punch animation
+            showPunchAnimation();
+
+            // Debug info
+            debugInfo.textContent = MESSAGES.PUNCH_DETECTED + `${magnitude.toFixed(2)}`;
+        }
+    }
+
+    // Show punch animation
+    function showPunchAnimation() {
+        punchAnimation.style.display = 'block';
+        punchAnimation.style.transform = 'scale(1.5)';
+
+        setTimeout(() => {
+            punchAnimation.style.transform = 'scale(1)';
+            setTimeout(() => {
+                punchAnimation.style.display = 'none';
+            }, 200);
+        }, 200);
+    }
+
+    // Upload the buffer of data points - ottimizzato per inviare meno dati
+    function uploadDataBuffer() {
+        if (dataBuffer.length === 0) return;
+
+        // Invia solo i dati più significativi - teniamo i 20 punti con maggiore intensità
+        // Questo riduce drasticamente il traffico di rete
+        const significantData = [...dataBuffer]
+            .sort((a, b) => b.magnitude - a.magnitude)
+            .slice(0, 20);
+
+        // Svuotiamo il buffer originale
+        dataBuffer = [];
+
+        // Se non ci sono dati significativi, non inviamo nulla
+        if (significantData.length === 0) {
+            return;
+        }
+
+        fetch('{{ url_for("upload_data_buffer") }}', {
+            method: 'POST',
+            headers: {
+                'Content-Type': 'application/x-www-form-urlencoded',
+            },
+            body: `data=${JSON.stringify(significantData)}`
+        })
+        .then(response => {
+            if (response.ok) {
+                console.log(`Uploaded ${significantData.length} data points`);
+                debugInfo.textContent = MESSAGES.DATA_SENT + significantData.length + " punti";
+            }
+        })
+        .catch(error => console.error('Error uploading data buffer:', error));
+    }
+
+    // Timer function
+    function updateTimer() {
+        seconds++;
+        const hours = Math.floor(seconds / 3600);
+        const minutes = Math.floor((seconds % 3600) / 60);
+        const secs = seconds % 60;
+
+        timerDisplay.textContent =
+            `${hours.toString().padStart(2, '0')}:${minutes.toString().padStart(2, '0')}:${secs.toString().padStart(2, '0')}`;
+    }
+
+    // Event listeners for buttons
+    startButton.addEventListener('click', function() {
+        if (!isRunning) {
+            if (initAccelerometer()) {
+                isRunning = true;
+                timer = setInterval(updateTimer, 1000);
+
+                startButton.style.display = 'none';
+                resumeButton.style.display = 'none';
+                pauseButton.disabled = false;
+                stopButton.disabled = false;
+            } else {
+                alert(MESSAGES.INIT_ERROR);
+            }
+        }
+    });
+
+    resumeButton.addEventListener('click', function() {
+        if (!isRunning) {
+            isRunning = true;
+            timer = setInterval(updateTimer, 1000);
+
+            if (sensor && sensor.activated) {
+                // Sensor is already active, just resume processing readings
+                debugInfo.textContent = MESSAGES.RUNNING;
+            } else {
+                // Try to restart the sensor
+                initAccelerometer();
+            }
+
+            resumeButton.style.display = 'none';
+            pauseButton.disabled = false;
+        }
+    });
+
+    pauseButton.addEventListener('click', function() {
+        if (isRunning) {
+            isRunning = false;
+            clearInterval(timer);
+
+            // We don't stop the sensor, just stop processing readings
+            debugInfo.textContent = MESSAGES.PAUSED;
+
+            resumeButton.style.display = 'inline-block';
+            pauseButton.disabled = true;
+
+            // Upload any remaining data
+            uploadDataBuffer();
+        }
+    });
+
+    stopButton.addEventListener('click', function() {
+        isRunning = false;
+        clearInterval(timer);
+
+        if (sensor) {
+            try {
+                sensor.stop();
+            } catch (e) {
+                console.error("Error stopping sensor:", e);
+            }
+        }
+
+        if (bufferTimer) {
+            clearInterval(bufferTimer);
+        }
+
+        // Upload any remaining data
+        uploadDataBuffer();
+
+        // Check if any punches were recorded
+        if (!hasPunches) {
+            alert(MESSAGES.NO_PUNCHES);
+
+            // End the session with deletion
+            fetch('{{ url_for("end_session") }}', {
+                method: 'POST'
+            })
+            .then(response => response.json())
+            .then(data => {
+                if (data.status === 'deleted' || data.status === 'error') {
+                    window.location.href = '{{ url_for("dashboard") }}';
+                }
+            })
+            .catch(error => console.error('Error ending session:', error));
+            return;
+        }
+
+        // End the session with saving
+        fetch('{{ url_for("end_session") }}', {
+            method: 'POST'
+        })
+        .then(response => response.json())
+        .then(data => {
+            if (data.status === 'saved' || data.status === 'deleted') {
+                window.location.href = '{{ url_for("dashboard") }}';
+            }
+        })
+        .catch(error => console.error('Error ending session:', error));
+    });
+
+    // Check for accelerometer permission
+    if (navigator.permissions) {
+        navigator.permissions.query({ name: 'accelerometer' })
+        .then(result => {
+            if (result.state === 'denied') {
+                debugInfo.textContent = MESSAGES.PERMISSION_DENIED;
+                alert(MESSAGES.PERMISSION_DENIED);
+            } else if (result.state === 'granted') {
+                debugInfo.textContent = MESSAGES.READY;
+            } else {
+                debugInfo.textContent = "Accelerometro: permesso in attesa di approvazione. Premi 'Inizia' quando pronto.";
+            }
+
+            // Listen for permission changes
+            result.onchange = function() {
+                if (result.state === 'denied') {
+                    debugInfo.textContent = MESSAGES.PERMISSION_DENIED;
+                    alert(MESSAGES.PERMISSION_DENIED);
+                    if (isRunning) {
+                        // Stop the session if it's running
+                        stopButton.click();
+                    }
+                } else if (result.state === 'granted') {
+                    debugInfo.textContent = MESSAGES.READY;
+                }
+            };
+        })
+        .catch(error => {
+            console.error("Error checking permission:", error);
+            debugInfo.textContent = "Impossibile verificare i permessi dell'accelerometro";
         });
+    } else {
+        debugInfo.textContent = "Il tuo browser non supporta la verifica dei permessi. Potrebbe essere necessario abilitare l'accesso manualmente.";
+    }
+});
     </script>
 </body>
 </html>
