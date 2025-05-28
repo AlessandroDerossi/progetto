@@ -15,5 +15,3 @@ secrets.json
 # Cartelle di IDE
 .idea/
 .vscode/credentials.json
-
- credentials.json
