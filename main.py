@@ -1,6 +1,7 @@
-from flask import Flask, render_template, request, redirect, url_for, session
+from flask import Flask, render_template, request, redirect, url_for, flash, session
 from datetime import datetime
 import json
+from werkzeug.security import generate_password_hash, check_password_hash
 from google.cloud import firestore
 from flask_login import LoginManager, current_user, login_user, logout_user, login_required, UserMixin
 from secret import secret_key
@@ -8,97 +9,227 @@ from secret import secret_key
 app = Flask(__name__)
 app.config['SECRET_KEY'] = secret_key
 
-# The login manager contains the code that lets your application and Flask-Login work together,
-# such as how to load a user from an ID, where to send users when they need to log in, and the like.
-login = LoginManager(app)
-login.login_view = 'login_page'
-
+login_manager = LoginManager(app)
+login_manager.login_view = 'login'
 
 class User(UserMixin):
-    def __init__(self, username):
+    def __init__(self, user_id, username, email):
         super().__init__()
-        self.id = username
+        self.id = user_id  # Flask-Login usa questo come ID univoco
         self.username = username
-        self.training_sessions = []
-
+        self.email = email
 
 # Initialize Firestore client (stile professore)
 db = firestore.Client.from_service_account_json('credentials.json', database='boxeproject')
 
+# Collections in Firestore
+USERS_COLLECTION = 'users'
+TRAINING_SESSIONS_COLLECTION = 'training_sessions'
 
-@login.user_loader
-def load_user(username):
-    entity = db.collection('users').document(username).get()
-    if entity.exists:
-        return User(username)
-    return None
-
+# User loader per Flask-Login (come il professore)
+@login_manager.user_loader
+def load_user(user_id):
+    try:
+        user_doc = db.collection(USERS_COLLECTION).document(user_id).get()
+        if user_doc.exists:
+            user_data = user_doc.to_dict()
+            return User(user_id, user_data['username'], user_data.get('email'))
+        return None
+    except Exception as e:
+        print(f"Error loading user: {e}")
+        return None
 
 @app.route('/')
-@login_required
 def main():
-    return render_template('dashboard.html', username=current_user.username)
+    if current_user.is_authenticated:
+        return redirect(url_for('dashboard'))
+    return redirect(url_for('login'))
 
+@app.route('/register', methods=['GET', 'POST'])
+def register():
+    if request.method == 'POST':
+        username = request.form['username']
+        password = request.form['password']
+        email = request.form['email']
+
+        # Basic validation
+        if not username or not password:
+            flash('Username e password sono obbligatori!')
+            return render_template('register.html')
+
+        # Hash password
+        hashed_password = generate_password_hash(password)
+
+        try:
+            # Check if username already exists
+            users_ref = db.collection(USERS_COLLECTION)
+            username_query = users_ref.where('username', '==', username).limit(1)
+            if len(list(username_query.stream())) > 0:
+                flash('Username già esistente. Prova con credenziali diverse.')
+                return render_template('register.html')
+
+            # Check if email already exists (if provided)
+            if email:
+                email_query = users_ref.where('email', '==', email).limit(1)
+                if len(list(email_query.stream())) > 0:
+                    flash('Email già esistente. Prova con credenziali diverse.')
+                    return render_template('register.html')
+
+            # Add new user con ID generato automaticamente
+            new_user = {
+                'username': username,
+                'password': hashed_password,
+                'email': email
+            }
+            doc_ref = users_ref.add(new_user)
+            user_id = doc_ref[1].id  # Prendi l'ID del documento creato
+
+            flash('Registrazione completata con successo! Ora puoi accedere.')
+            return redirect(url_for('login'))
+        except Exception as e:
+            print(f"Error during registration: {e}")
+            flash('Errore durante la registrazione. Riprova più tardi.')
+            return render_template('register.html')
+
+    return render_template('register.html')
+
+@app.route('/login', methods=['GET', 'POST'])
+def login():
+    if current_user.is_authenticated:
+        return redirect(url_for('dashboard'))
+
+    if request.method == 'POST':
+        username = request.form['username']
+        password = request.form['password']
+
+        try:
+            users_ref = db.collection(USERS_COLLECTION)
+            query = users_ref.where('username', '==', username).limit(1)
+            users = list(query.stream())
+
+            if users and check_password_hash(users[0].to_dict()['password'], password):
+                user_data = users[0].to_dict()
+                user = User(users[0].id, username, user_data.get('email'))
+                login_user(user)
+
+                # Redirect alla pagina richiesta o dashboard
+                next_page = request.args.get('next')
+                return redirect(next_page) if next_page else redirect(url_for('dashboard'))
+
+            flash('Username o password non validi.')
+        except Exception as e:
+            print(f"Error during login: {e}")
+            flash('Errore durante il login. Riprova più tardi.')
+
+    return render_template('login.html')
+
+@app.route('/logout')
+@login_required
+def logout():
+    logout_user()
+    flash('Hai effettuato il logout con successo.')
+    return redirect(url_for('login'))
 
 @app.route('/dashboard')
-@login_required
+@login_required  # Usa il decoratore Flask-Login
 def dashboard():
-    # Get user's training sessions for dashboard
-    entity = db.collection('users').document(current_user.username).get()
-    if entity.exists:
-        user_data = entity.to_dict()
-        sessions = user_data.get('training_sessions', [])
+    # Get general user statistics
+    user_id = current_user.id  # Usa current_user invece di session
 
-        # Calculate stats
-        session_count = len(sessions)
-        total_punches = 0
-        total_intensity = 0
+    # Get all user sessions
+    sessions_ref = db.collection(TRAINING_SESSIONS_COLLECTION)
+    sessions_query = sessions_ref.where('user_id', '==', user_id)
+    session_list = list(sessions_query.stream())
 
-        for session_data in sessions:
-            punches = session_data.get('punches', [])
-            total_punches += len(punches)
-            if session_data.get('avg_intensity', 0) > 0:
-                total_intensity += session_data.get('avg_intensity', 0)
+    # Calculate stats
+    session_count = len(session_list)
+    total_punches = 0
+    total_intensity = 0
+    intensity_count = 0
 
-        avg_intensity = round(total_intensity / session_count, 2) if session_count > 0 else 0
+    for sess in session_list:
+        session_data = sess.to_dict()
+        punch_count = len(session_data.get('punches', []))
+        total_punches += punch_count
+        if session_data.get('avg_intensity', 0) > 0:
+            total_intensity += session_data.get('avg_intensity', 0)
+            intensity_count += 1
 
-        return render_template('dashboard.html',
-                               username=current_user.username,
-                               session_count=session_count,
-                               punch_count=total_punches,
-                               avg_intensity=avg_intensity)
-    else:
-        return render_template('dashboard.html',
-                               username=current_user.username,
-                               session_count=0,
-                               punch_count=0,
-                               avg_intensity=0)
+    # Calculate average intensity across all sessions
+    avg_intensity = 0
+    if intensity_count > 0:
+        avg_intensity = round(total_intensity / intensity_count, 2)
 
+    return render_template('dashboard.html',
+                           username=current_user.username,  # Usa current_user
+                           session_count=session_count,
+                           punch_count=total_punches,
+                           avg_intensity=avg_intensity)
 
-@app.route('/training')
+@app.route('/stats')
 @login_required
-def training():
-    # Get user's training sessions
-    entity = db.collection('users').document(current_user.username).get()
-    if entity.exists:
-        user_data = entity.to_dict()
-        sessions = user_data.get('training_sessions', [])
-        # Sort by date (most recent first)
-        sessions.sort(key=lambda x: x.get('date', ''), reverse=True)
-        return render_template('training.html',
-                               username=current_user.username,
-                               sessions=sessions)
-    else:
-        return render_template('training.html',
-                               username=current_user.username,
-                               sessions=[])
+def stats():
+    user_id = current_user.id
 
+    # Get user's training sessions
+    sessions_ref = db.collection(TRAINING_SESSIONS_COLLECTION)
+    sessions_query = sessions_ref.where('user_id', '==', user_id)
+    sessions = list(sessions_query.stream())
+
+    sessions_data = []
+    for sess in sessions:
+        session_data = sess.to_dict()
+        punches = session_data.get('punches', [])
+        # Skip sessions with no punches
+        if len(punches) == 0:
+            continue
+
+        sessions_data.append({
+            'id': sess.id,
+            'date': session_data.get('date', ''),
+            'duration': session_data.get('duration', 0),
+            'punch_count': len(punches),
+            'avg_intensity': session_data.get('avg_intensity', 0)
+        })
+
+    # Sort by date (most recent first)
+    sessions_data.sort(key=lambda x: x['date'], reverse=True)
+
+    return render_template('stats.html', sessions=sessions_data, username=current_user.username)
+
+@app.route('/start_session', methods=['POST'])
+@login_required
+def start_session():
+    user_id = current_user.id
+    now = datetime.now()
+    date_str = now.strftime("%Y-%m-%d %H:%M:%S")
+
+    sessions_ref = db.collection(TRAINING_SESSIONS_COLLECTION)
+
+    # Create new session
+    new_session = {
+        'user_id': user_id,
+        'date': date_str,
+        'avg_intensity': 0,
+        'duration': 0,
+        'punches': []
+    }
+
+    session_ref = sessions_ref.add(new_session)
+    session_id = session_ref[1].id
+
+    # Memorizza nella sessione Flask (per la sessione di allenamento attiva)
+    session['training_session_id'] = session_id
+    session['training_start_time'] = date_str
+
+    return redirect(url_for('active_training'))
 
 @app.route('/active_training')
 @login_required
 def active_training():
-    if 'training_session' not in session:
-        return redirect('/dashboard')
+    if 'training_session_id' not in session:
+        flash('Nessuna sessione di allenamento attiva')
+        return redirect(url_for('dashboard'))
 
     start_time = session.get('training_start_time', datetime.now().strftime("%Y-%m-%d %H:%M:%S"))
 
@@ -106,116 +237,70 @@ def active_training():
                            username=current_user.username,
                            start_time=start_time)
 
-
-@app.route('/stats')
-@login_required
-def stats():
-    # Get user's training sessions
-    entity = db.collection('users').document(current_user.username).get()
-    if entity.exists:
-        user_data = entity.to_dict()
-        sessions = user_data.get('training_sessions', [])
-
-        # Calculate stats
-        session_count = len(sessions)
-        total_punches = 0
-        total_intensity = 0
-
-        for session_data in sessions:
-            punches = session_data.get('punches', [])
-            total_punches += len(punches)
-            if session_data.get('avg_intensity', 0) > 0:
-                total_intensity += session_data.get('avg_intensity', 0)
-
-        avg_intensity = round(total_intensity / session_count, 2) if session_count > 0 else 0
-
-        return render_template('stats.html',
-                               username=current_user.username,
-                               session_count=session_count,
-                               punch_count=total_punches,
-                               avg_intensity=avg_intensity,
-                               sessions=sessions)
-    else:
-        return 'user not found', 404
-
-
-@app.route('/start_session', methods=['POST'])
-@login_required
-def start_session():
-    now = datetime.now()
-    date_str = now.strftime("%Y-%m-%d %H:%M:%S")
-
-    # Create new session
-    new_session = {
-        'date': date_str,
-        'avg_intensity': 0,
-        'duration': 0,
-        'punches': []
-    }
-
-    # Store in Flask session (per la sessione di allenamento attiva)
-    session['training_session'] = new_session
-    session['training_start_time'] = date_str
-
-    return redirect('/active_training')
-
-
 @app.route('/end_session', methods=['POST'])
 @login_required
 def end_session():
-    if 'training_session' in session:
-        training_session = session['training_session']
+    if 'training_session_id' in session:
+        session_id = session['training_session_id']
 
-        # If there are no punches, don't save
-        if len(training_session.get('punches', [])) == 0:
-            session.pop('training_session', None)
+        # Get session data
+        session_ref = db.collection(TRAINING_SESSIONS_COLLECTION).document(session_id)
+        session_data = session_ref.get().to_dict()
+
+        # If there are no punches, delete this session
+        if len(session_data.get('punches', [])) == 0:
+            session_ref.delete()
+            flash('Sessione terminata. Nessun dato salvato poiché non sono stati registrati pugni.')
+
+            # Remove session info from user session
+            session.pop('training_session_id', None)
             session.pop('training_start_time', None)
+
             return json.dumps({'status': 'deleted', 'message': 'Sessione eliminata perché non conteneva pugni'}), 200
-
-        # Calculate duration
-        start_time_str = training_session.get('date')
-        start_time = datetime.strptime(start_time_str, "%Y-%m-%d %H:%M:%S")
-        end_time = datetime.now()
-        duration_seconds = int((end_time - start_time).total_seconds())
-        duration_minutes = round(duration_seconds / 60, 2)
-
-        # Update session with duration
-        training_session['duration'] = duration_minutes
-
-        # Save to user's training sessions
-        entity = db.collection('users').document(current_user.username).get()
-        if entity.exists:
-            user_data = entity.to_dict()
-            sessions = user_data.get('training_sessions', [])
-            sessions.append(training_session)
-            db.collection('users').document(current_user.username).update({'training_sessions': sessions})
         else:
-            db.collection('users').document(current_user.username).set({'training_sessions': [training_session]})
+            # Calculate duration
+            start_time_str = session_data.get('date')
+            start_time = datetime.strptime(start_time_str, "%Y-%m-%d %H:%M:%S")
+            end_time = datetime.now()
+            duration_seconds = int((end_time - start_time).total_seconds())
 
-        # Remove session info from Flask session
-        session.pop('training_session', None)
-        session.pop('training_start_time', None)
+            # Convert seconds to minutes for display purposes
+            duration_minutes = round(duration_seconds / 60, 2)
 
-        return json.dumps({'status': 'saved', 'message': 'Allenamento salvato con successo'}), 200
+            # Update session with duration
+            session_ref.update({
+                'duration': duration_minutes
+            })
+
+            flash('Allenamento terminato e salvato con successo!')
+
+            # Remove session info from user session
+            session.pop('training_session_id', None)
+            session.pop('training_start_time', None)
+
+            return json.dumps({'status': 'saved', 'message': 'Allenamento salvato con successo'}), 200
 
     return json.dumps({'status': 'error', 'message': 'Nessuna sessione attiva'}), 400
-
 
 @app.route('/upload_data_buffer', methods=['POST'])
 @login_required
 def upload_data_buffer():
-    if 'training_session' not in session:
+    if 'training_session_id' not in session:
         return 'No active session', 400
 
     try:
         data = json.loads(request.values['data'])
-        training_session = session['training_session']
+        session_id = session['training_session_id']
+
+        # Get session reference
+        session_ref = db.collection(TRAINING_SESSIONS_COLLECTION).document(session_id)
+        session_data = session_ref.get().to_dict()
 
         # Current data
-        punches = training_session.get('punches', [])
+        punches = session_data.get('punches', [])
         current_punch_count = len(punches)
-        current_total_intensity = training_session.get('avg_intensity',
-                                                       0) * current_punch_count if current_punch_count > 0 else 0
+        current_total_intensity = session_data.get('avg_intensity',
+                                                   0) * current_punch_count if current_punch_count > 0 else 0
 
         # Process new punches
         new_punches = []
@@ -248,39 +333,41 @@ def upload_data_buffer():
         total_intensity = current_total_intensity + total_new_intensity
         avg_intensity = round(total_intensity / total_punches, 2) if total_punches > 0 else 0
 
-        # Update session in Flask session
-        training_session['avg_intensity'] = avg_intensity
-        training_session['punches'].extend(new_punches)
-        session['training_session'] = training_session
+        # Update session document
+        session_ref.update({
+            'avg_intensity': avg_intensity,
+            'punches': firestore.ArrayUnion(new_punches)
+        })
 
         return 'Data saved successfully', 200
     except Exception as e:
         print(f"Error saving data: {e}")
         return f'Error saving data: {str(e)}', 500
 
-
 @app.route('/upload_data', methods=['POST'])
 @login_required
 def upload_data():
-    if 'training_session' not in session:
+    if 'training_session_id' not in session:
         return 'No active session', 400
 
     try:
         i = float(request.values['i'])
         j = float(request.values['j'])
         k = float(request.values['k'])
+        session_id = session['training_session_id']
         now = datetime.now().strftime("%Y-%m-%d %H:%M:%S.%f")
 
         # Calculate punch intensity
         intensity = (i ** 2 + j ** 2 + k ** 2) ** 0.5
 
-        training_session = session['training_session']
+        session_ref = db.collection(TRAINING_SESSIONS_COLLECTION).document(session_id)
+        session_data = session_ref.get().to_dict()
 
         # Current data
-        punches = training_session.get('punches', [])
+        punches = session_data.get('punches', [])
         current_punch_count = len(punches)
-        current_total_intensity = training_session.get('avg_intensity',
-                                                       0) * current_punch_count if current_punch_count > 0 else 0
+        current_total_intensity = session_data.get('avg_intensity',
+                                                   0) * current_punch_count if current_punch_count > 0 else 0
 
         # Add new punch
         new_punch = {
@@ -296,48 +383,50 @@ def upload_data():
         total_intensity = current_total_intensity + intensity
         avg_intensity = round(total_intensity / total_punches, 2)
 
-        # Update session in Flask session
-        training_session['avg_intensity'] = avg_intensity
-        training_session['punches'].append(new_punch)
-        session['training_session'] = training_session
+        # Update session document
+        session_ref.update({
+            'avg_intensity': avg_intensity,
+            'punches': firestore.ArrayUnion([new_punch])
+        })
 
         return 'Data saved successfully', 200
     except Exception as e:
         print(f"Error saving data: {e}")
         return f'Error saving data: {str(e)}', 500
 
+@app.route('/training')
+@login_required
+def training():
+    user_id = current_user.id
 
-@app.route('/login_page')
-def login_page():
-    if current_user.is_authenticated:
-        return redirect('/dashboard')
-    return render_template('login.html')
+    # Get user's training sessions
+    sessions_ref = db.collection(TRAINING_SESSIONS_COLLECTION)
+    sessions_query = sessions_ref.where('user_id', '==', user_id)
+    sessions = list(sessions_query.stream())
 
+    sessions_data = []
+    for sess in sessions:
+        session_data = sess.to_dict()
+        punches = session_data.get('punches', [])
 
-@app.route('/login', methods=['POST'])
-def login():
-    if current_user.is_authenticated:
-        return redirect('/main')
-    username = request.values['u']
-    password = request.values['p']
-    next_page = request.values.get('next', '/main')
+        # Skip sessions with no punches
+        if len(punches) == 0:
+            continue
 
-    # Access Firestore to validate the user
-    entity = db.collection('users').document(username).get()
-    if entity.exists:
-        user_data = entity.to_dict()
-        if user_data.get('password') == password:
-            login_user(User(username))
-            return redirect(next_page)
+        sessions_data.append({
+            'id': sess.id,
+            'date': session_data.get('date', ''),
+            'duration': session_data.get('duration', 0),
+            'punch_count': len(punches),
+            'avg_intensity': session_data.get('avg_intensity', 0)
+        })
 
-    return redirect('/login_page')
+    # Sort by date (most recent first)
+    sessions_data.sort(key=lambda x: x['date'], reverse=True)
 
-
-@app.route('/logout')
-def logout():
-    logout_user()
-    return redirect('/')
-
+    return render_template('training.html',
+                           username=current_user.username,
+                           sessions=sessions_data)
 
 if __name__ == '__main__':
     app.run(host='0.0.0.0', port=222, debug=True, ssl_context='adhoc')
