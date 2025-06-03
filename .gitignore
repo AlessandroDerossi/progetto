@@ -10,7 +10,7 @@ __pycache__/
 # File di configurazione locali e credenziali
 .env
 config.json
-secrets.json
+secrets.py
 credentials.json
 
 # Cartelle degli IDE

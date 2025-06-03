@@ -11,7 +11,7 @@ from flask_login import LoginManager, current_user, login_user, logout_user, log
 # pip install flask flask-login
 
 app = Flask(__name__)
-app.config['SECRET_KEY'] = 'your_secret_key_here'
+app.config['SECRET_KEY'] = secrets
 
 # Setup Flask-Login come il professore
 login_manager = LoginManager(app)
