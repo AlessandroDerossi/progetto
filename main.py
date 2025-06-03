@@ -1,29 +1,17 @@
-import form
-
-import secrets
-
 from flask import Flask, render_template, request, redirect, url_for, flash
-import os
 from datetime import datetime
 import json
 from werkzeug.security import generate_password_hash, check_password_hash
 from google.cloud import firestore
 from flask_login import LoginManager, current_user, login_user, logout_user, login_required, UserMixin
-form secrets import secret_key
-
-# requirements:
-# pip install pyopenssl werkzeug google-cloud-firestore
-# pip install flask flask-logins
+from secrets import secret_key
 
 app = Flask(__name__)
 app.config['SECRET_KEY'] = secret_key
 
-# Setup Flask-Login come il professore
 login_manager = LoginManager(app)
 login_manager.login_view = 'login'
 
-
-# Classe User come il professore
 class User(UserMixin):
     def __init__(self, user_id, username, email=None):
         super().__init__()
