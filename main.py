@@ -4,7 +4,7 @@ import json
 from werkzeug.security import generate_password_hash, check_password_hash
 from google.cloud import firestore
 from flask_login import LoginManager, current_user, login_user, logout_user, login_required, UserMixin
-from secrets import secret_key
+from secret import secret_key
 
 app = Flask(__name__)
 app.config['SECRET_KEY'] = secret_key
