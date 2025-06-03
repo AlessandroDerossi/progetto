@@ -11,7 +11,7 @@ __pycache__/
 .env
 config.json
 secrets.json
-credentials.json  # aggiunto per sicurezza
+credentials.json
 
 # Cartelle degli IDE
 .idea/
