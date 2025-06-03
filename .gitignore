@@ -7,13 +7,12 @@ __pycache__/
 *.pyc
 *.pyo
 
-# File di configurazione locali
+# File di configurazione locali e credenziali
 .env
 config.json
 secrets.json
+credentials.json  # aggiunto per sicurezza
 
-# Cartelle di IDE
+# Cartelle degli IDE
 .idea/
-.vscode/credentials.json
-
-credentials.json
+.vscode/
