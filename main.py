@@ -12,33 +12,35 @@ app.config['SECRET_KEY'] = secret_key
 login_manager = LoginManager(app)
 login_manager.login_view = 'login'
 
+# Classe User (programmazione oggetti) per Flask-Login
 class User(UserMixin):
     def __init__(self, user_id, username, email):
         super().__init__()
-        self.id = user_id  # Flask-Login usa questo come ID univoco
-        self.username = username
-        self.email = email
+        self.id = user_id  # ID univoco
+        self.username = username # Attributi
+        self.email = email #Attributi
 
-# Initialize Firestore client (stile professore)
+# Inizializzazione Firestore client
 db = firestore.Client.from_service_account_json('credentials.json', database='boxeproject')
 
-# Collections in Firestore
+# Collezioni in Firestore (abbiamo due collezioni principali)
 USERS_COLLECTION = 'users'
 TRAINING_SESSIONS_COLLECTION = 'training_sessions'
 
-# User loader per Flask-Login (come il professore)
+# Funzione per caricare l'utente da Firestore
 @login_manager.user_loader
 def load_user(user_id):
-    try:
-        user_doc = db.collection(USERS_COLLECTION).document(user_id).get()
+    try: #Gestione errori
+        user_doc = db.collection(USERS_COLLECTION).document(user_id).get() # Documento utende da user_ID
         if user_doc.exists:
-            user_data = user_doc.to_dict()
-            return User(user_id, user_data['username'], user_data.get('email'))
+            user_data = user_doc.to_dict() # Converti il documento in un dizionario
+            return User(user_id, user_data['username'], user_data.get['email']) # Crea un oggetto User
+            #prendo username e mail con le parentesi quadre cosi se non esistono ritorna un errore (dati obbligatori alla registrazione)
         return None
     except Exception as e:
         print(f"Error loading user: {e}")
         return None
-
+########################################################################################################
 @app.route('/')
 def main():
     if current_user.is_authenticated:
