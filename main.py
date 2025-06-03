@@ -1,16 +1,30 @@
-from flask import Flask, render_template, request, redirect, url_for, session, flash
+from flask import Flask, render_template, request, redirect, url_for, flash
 import os
 from datetime import datetime
 import json
 from werkzeug.security import generate_password_hash, check_password_hash
 from google.cloud import firestore
+from flask_login import LoginManager, current_user, login_user, logout_user, login_required, UserMixin
 
 # requirements:
 # pip install pyopenssl werkzeug google-cloud-firestore
-# pip install flask
+# pip install flask flask-login
 
 app = Flask(__name__)
-app.secret_key = 'your_secret_key_here'  # Important for session, change with a secure key
+app.config['SECRET_KEY'] = 'your_secret_key_here'
+
+# Setup Flask-Login come il professore
+login_manager = LoginManager(app)
+login_manager.login_view = 'login'
+
+
+# Classe User come il professore
+class User(UserMixin):
+    def __init__(self, user_id, username, email=None):
+        super().__init__()
+        self.id = user_id  # Flask-Login usa questo come ID univoco
+        self.username = username
+        self.email = email
 
 
 # Initialize Firestore client
@@ -18,32 +32,29 @@ def get_firestore_client():
     return firestore.Client.from_service_account_json('credentials.json', database='boxeproject')
 
 
-# Collections in Firestore - only 2 collections now
+# Collections in Firestore
 USERS_COLLECTION = 'users'
 TRAINING_SESSIONS_COLLECTION = 'training_sessions'
 
 
-# Initialize database structure
-def init_db():
-    # Firestore collections are created automatically when documents are added
-    # No need for explicit schema creation like in SQLite
-    pass
-
-
-# Middleware for checking if user is logged in
-def login_required(view):
-    def wrapped_view(*args, **kwargs):
-        if 'user_id' not in session:
-            return redirect(url_for('login'))
-        return view(*args, **kwargs)
-
-    wrapped_view.__name__ = view.__name__
-    return wrapped_view
+# User loader per Flask-Login (come il professore)
+@login_manager.user_loader
+def load_user(user_id):
+    try:
+        db = get_firestore_client()
+        user_doc = db.collection(USERS_COLLECTION).document(user_id).get()
+        if user_doc.exists:
+            user_data = user_doc.to_dict()
+            return User(user_id, user_data['username'], user_data.get('email'))
+        return None
+    except Exception as e:
+        print(f"Error loading user: {e}")
+        return None
 
 
 @app.route('/')
 def main():
-    if 'user_id' in session:
+    if current_user.is_authenticated:
         return redirect(url_for('dashboard'))
     return redirect(url_for('login'))
 
@@ -79,13 +90,14 @@ def register():
                     flash('Email già esistente. Prova con credenziali diverse.')
                     return render_template('register.html')
 
-            # Add new user
+            # Add new user con ID generato automaticamente
             new_user = {
                 'username': username,
                 'password': hashed_password,
                 'email': email
             }
-            user_ref = users_ref.add(new_user)
+            doc_ref = users_ref.add(new_user)
+            user_id = doc_ref[1].id  # Prendi l'ID del documento creato
 
             flash('Registrazione completata con successo! Ora puoi accedere.')
             return redirect(url_for('login'))
@@ -99,6 +111,9 @@ def register():
 
 @app.route('/login', methods=['GET', 'POST'])
 def login():
+    if current_user.is_authenticated:
+        return redirect(url_for('dashboard'))
+
     if request.method == 'POST':
         username = request.form['username']
         password = request.form['password']
@@ -111,10 +126,12 @@ def login():
 
             if users and check_password_hash(users[0].to_dict()['password'], password):
                 user_data = users[0].to_dict()
-                session.clear()
-                session['user_id'] = users[0].id
-                session['username'] = username
-                return redirect(url_for('dashboard'))
+                user = User(users[0].id, username, user_data.get('email'))
+                login_user(user)
+
+                # Redirect alla pagina richiesta o dashboard
+                next_page = request.args.get('next')
+                return redirect(next_page) if next_page else redirect(url_for('dashboard'))
 
             flash('Username o password non validi.')
         except Exception as e:
@@ -125,17 +142,18 @@ def login():
 
 
 @app.route('/logout')
+@login_required
 def logout():
-    session.clear()
+    logout_user()
     flash('Hai effettuato il logout con successo.')
     return redirect(url_for('login'))
 
 
 @app.route('/dashboard')
-@login_required
+@login_required  # Usa il decoratore Flask-Login
 def dashboard():
     # Get general user statistics
-    user_id = session.get('user_id')
+    user_id = current_user.id  # Usa current_user invece di session
     db = get_firestore_client()
 
     # Get all user sessions
@@ -163,7 +181,7 @@ def dashboard():
         avg_intensity = round(total_intensity / intensity_count, 2)
 
     return render_template('dashboard.html',
-                           username=session.get('username'),
+                           username=current_user.username,  # Usa current_user
                            session_count=session_count,
                            punch_count=total_punches,
                            avg_intensity=avg_intensity)
@@ -172,7 +190,7 @@ def dashboard():
 @app.route('/stats')
 @login_required
 def stats():
-    user_id = session.get('user_id')
+    user_id = current_user.id
     db = get_firestore_client()
 
     # Get user's training sessions
@@ -199,41 +217,43 @@ def stats():
     # Sort by date (most recent first)
     sessions_data.sort(key=lambda x: x['date'], reverse=True)
 
-    return render_template('stats.html', sessions=sessions_data, username=session.get('username'))
+    return render_template('stats.html', sessions=sessions_data, username=current_user.username)
 
 
 @app.route('/start_session', methods=['POST'])
 @login_required
 def start_session():
-    user_id = session.get('user_id')
+    user_id = current_user.id
     now = datetime.now()
     date_str = now.strftime("%Y-%m-%d %H:%M:%S")
 
     db = get_firestore_client()
     sessions_ref = db.collection(TRAINING_SESSIONS_COLLECTION)
 
-    # Order fields as requested: user_id, date, avg_intensity, duration, punches
+    # Create new session
     new_session = {
         'user_id': user_id,
         'date': date_str,
         'avg_intensity': 0,
         'duration': 0,
-        'punches': []  # Store punch data directly in the session
+        'punches': []
     }
 
     session_ref = sessions_ref.add(new_session)
     session_id = session_ref[1].id
 
+    # Memorizza nella sessione Flask (per la sessione di allenamento attiva)
+    from flask import session
     session['training_session_id'] = session_id
     session['training_start_time'] = date_str
 
-    # Redirect to the new active training page
     return redirect(url_for('active_training'))
 
 
 @app.route('/active_training')
 @login_required
 def active_training():
+    from flask import session
     if 'training_session_id' not in session:
         flash('Nessuna sessione di allenamento attiva')
         return redirect(url_for('dashboard'))
@@ -241,13 +261,14 @@ def active_training():
     start_time = session.get('training_start_time', datetime.now().strftime("%Y-%m-%d %H:%M:%S"))
 
     return render_template('active_training.html',
-                           username=session.get('username'),
+                           username=current_user.username,
                            start_time=start_time)
 
 
 @app.route('/end_session', methods=['POST'])
 @login_required
 def end_session():
+    from flask import session
     if 'training_session_id' in session:
         session_id = session['training_session_id']
         db = get_firestore_client()
@@ -276,7 +297,7 @@ def end_session():
             # Convert seconds to minutes for display purposes
             duration_minutes = round(duration_seconds / 60, 2)
 
-            # Update session with duration (store as minutes, not seconds)
+            # Update session with duration
             session_ref.update({
                 'duration': duration_minutes
             })
@@ -295,6 +316,7 @@ def end_session():
 @app.route('/upload_data_buffer', methods=['POST'])
 @login_required
 def upload_data_buffer():
+    from flask import session
     if 'training_session_id' not in session:
         return 'No active session', 400
 
@@ -323,7 +345,7 @@ def upload_data_buffer():
             y = point.get('y', 0)
             z = point.get('z', 0)
 
-            # Calculate punch intensity (magnitude of acceleration)
+            # Calculate punch intensity
             intensity = (x ** 2 + y ** 2 + z ** 2) ** 0.5
             total_new_intensity += intensity
 
@@ -359,6 +381,7 @@ def upload_data_buffer():
 @app.route('/upload_data', methods=['POST'])
 @login_required
 def upload_data():
+    from flask import session
     if 'training_session_id' not in session:
         return 'No active session', 400
 
@@ -411,7 +434,7 @@ def upload_data():
 @app.route('/training')
 @login_required
 def training():
-    user_id = session.get('user_id')
+    user_id = current_user.id
     db = get_firestore_client()
 
     # Get user's training sessions
@@ -440,7 +463,7 @@ def training():
     sessions_data.sort(key=lambda x: x['date'], reverse=True)
 
     return render_template('training.html',
-                           username=session.get('username'),
+                           username=current_user.username,
                            sessions=sessions_data)
 
 
