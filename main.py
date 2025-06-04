@@ -34,18 +34,16 @@ def load_user(user_id):
         user_doc = db.collection(USERS_COLLECTION).document(user_id).get() # Documento utende da user_ID
         if user_doc.exists:
             user_data = user_doc.to_dict() # Converti il documento in un dizionario
-            return User(user_id, user_data['username'], user_data.get['email']) # Crea un oggetto User
+            return User(user_id, user_data['username'], user_data['email']) # Crea un oggetto User (usiamo le parentesi quadre perche mail e username sono obbligatori altrimenti .get + tonde)
             #prendo username e mail con le parentesi quadre cosi se non esistono ritorna un errore (dati obbligatori alla registrazione)
         return None
     except Exception as e:
         print(f"Error loading user: {e}")
         return None
-########################################################################################################
 @app.route('/')
+@login_required  #Manda direttamente al login se non autenticato
 def main():
-    if current_user.is_authenticated:
-        return redirect(url_for('dashboard'))
-    return redirect(url_for('login'))
+    return redirect('/templates/dashboard.html')
 
 @app.route('/register', methods=['GET', 'POST'])
 def register():
@@ -55,9 +53,23 @@ def register():
         email = request.form['email']
 
         # Basic validation
-        if not username or not password:
-            flash('Username e password sono obbligatori!')
-            return render_template('register.html')
+        if not username or not password or not email:
+
+
+
+            ########################################
+
+
+
+
+
+
+
+
+
+
+            flash('Username, password ed email sono obbligatori!')
+            return render_template('register.html') #render_template rimanda alla stessa pagina, redirect cambia pagina
 
         # Hash password
         hashed_password = generate_password_hash(password)
