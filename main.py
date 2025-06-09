@@ -1,7 +1,6 @@
 from flask import Flask, render_template, request, redirect, url_for, flash, session
 from datetime import datetime
 import json
-from werkzeug.security import generate_password_hash, check_password_hash
 from google.cloud import firestore
 from flask_login import LoginManager, current_user, login_user, logout_user, login_required, UserMixin
 from secret import secret_key
@@ -40,7 +39,9 @@ def load_user(user_id):
     except Exception as e:
         print(f"Error loading user: {e}")
         return None
+
 @app.route('/')
+
 @login_required  #Manda direttamente al login se non autenticato
 def main():
     return redirect('/templates/dashboard.html')
@@ -54,25 +55,8 @@ def register():
 
         # Basic validation
         if not username or not password or not email:
-
-
-
-            ########################################
-
-
-
-
-
-
-
-
-
-
-            flash('Username, password ed email sono obbligatori!')
-            return render_template('register.html') #render_template rimanda alla stessa pagina, redirect cambia pagina
-
-        # Hash password
-        hashed_password = generate_password_hash(password)
+            flash('Username, password ed email sono obbligatori!') #invio messaggio di errore pagina html
+            return render_template('register.html')
 
         try:
             # Check if username already exists
@@ -82,7 +66,7 @@ def register():
                 flash('Username già esistente. Prova con credenziali diverse.')
                 return render_template('register.html')
 
-            # Check if email already exists (if provided)
+            # Check if email already exists
             if email:
                 email_query = users_ref.where('email', '==', email).limit(1)
                 if len(list(email_query.stream())) > 0:
@@ -92,11 +76,11 @@ def register():
             # Add new user con ID generato automaticamente
             new_user = {
                 'username': username,
-                'password': hashed_password,
+                'password': password,  # Password in chiaro
                 'email': email
             }
             doc_ref = users_ref.add(new_user)
-            user_id = doc_ref[1].id  # Prendi l'ID del documento creato
+            user_id = doc_ref[1].id
 
             flash('Registrazione completata con successo! Ora puoi accedere.')
             return redirect(url_for('login'))
@@ -121,12 +105,11 @@ def login():
             query = users_ref.where('username', '==', username).limit(1)
             users = list(query.stream())
 
-            if users and check_password_hash(users[0].to_dict()['password'], password):
+            if users and users[0].to_dict()['password'] == password:  # Confronto diretto
                 user_data = users[0].to_dict()
                 user = User(users[0].id, username, user_data.get('email'))
                 login_user(user)
 
-                # Redirect alla pagina richiesta o dashboard
                 next_page = request.args.get('next')
                 return redirect(next_page) if next_page else redirect(url_for('dashboard'))
 
