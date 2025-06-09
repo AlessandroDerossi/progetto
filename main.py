@@ -22,15 +22,11 @@ class User(UserMixin):
 # Inizializzazione Firestore client
 db = firestore.Client.from_service_account_json('credentials.json', database='boxeproject')
 
-# Collezioni in Firestore (abbiamo due collezioni principali)
-USERS_COLLECTION = 'users'
-TRAINING_SESSIONS_COLLECTION = 'training_sessions'
-
 # Funzione per caricare l'utente da Firestore
 @login_manager.user_loader
 def load_user(user_id):
     try: #Gestione errori
-        user_doc = db.collection(USERS_COLLECTION).document(user_id).get() # Documento utende da user_ID
+        user_doc = db.collection('users').document(user_id).get() # Documento utende da user_ID
         if user_doc.exists:
             user_data = user_doc.to_dict() # Converti il documento in un dizionario
             return User(user_id, user_data['username'], user_data['email']) # Crea un oggetto User (usiamo le parentesi quadre perche mail e username sono obbligatori altrimenti .get + tonde)
@@ -46,6 +42,7 @@ def load_user(user_id):
 def main():
     return redirect('/templates/dashboard.html')
 
+
 @app.route('/register', methods=['GET', 'POST'])
 def register():
     if request.method == 'POST':
@@ -55,41 +52,45 @@ def register():
 
         # Basic validation
         if not username or not password or not email:
-            flash('Username, password ed email sono obbligatori!') #invio messaggio di errore pagina html
-            return render_template('register.html')
+            flash('Username, password ed email sono obbligatori!')  # invio messaggio di errore pagina html
+            return render_template(
+                'register.html')  # render_template rimanda alla stessa pagina, redirect cambia pagina
 
         try:
-            # Check if username already exists
-            users_ref = db.collection(USERS_COLLECTION)
-            username_query = users_ref.where('username', '==', username).limit(1)
-            if len(list(username_query.stream())) > 0:
+            # controlla se username esiste già
+            user_doc = db.collection('users').document(username).get()  # accesso diretto al documento
+            if user_doc.exists:
                 flash('Username già esistente. Prova con credenziali diverse.')
                 return render_template('register.html')
 
-            # Check if email already exists
+            # controlla se email esiste già
             if email:
-                email_query = users_ref.where('email', '==', email).limit(1)
-                if len(list(email_query.stream())) > 0:
+                users_ref = db.collection('users')  # riferimento alla collezione 'users'
+                email_query = users_ref.where('email', '==', email).limit(1)  # limit per fermare la ricerca al primo risultato
+                if len(list(email_query.stream())) > 0:  # .stream esegue la query
                     flash('Email già esistente. Prova con credenziali diverse.')
                     return render_template('register.html')
 
-            # Add new user con ID generato automaticamente
+            # Nuovo utente con ID = username
             new_user = {
                 'username': username,
-                'password': password,  # Password in chiaro
+                'password': password,
                 'email': email
             }
-            doc_ref = users_ref.add(new_user)
-            user_id = doc_ref[1].id
+
+            db.collection('users').document(username).set(new_user) #.set per creare un documento con ID specifico
 
             flash('Registrazione completata con successo! Ora puoi accedere.')
             return redirect(url_for('login'))
+
         except Exception as e:
             print(f"Error during registration: {e}")
             flash('Errore durante la registrazione. Riprova più tardi.')
             return render_template('register.html')
 
     return render_template('register.html')
+
+###
 
 @app.route('/login', methods=['GET', 'POST'])
 def login():
@@ -101,7 +102,7 @@ def login():
         password = request.form['password']
 
         try:
-            users_ref = db.collection(USERS_COLLECTION)
+            users_ref = db.collection('users')
             query = users_ref.where('username', '==', username).limit(1)
             users = list(query.stream())
 
@@ -134,7 +135,7 @@ def dashboard():
     user_id = current_user.id  # Usa current_user invece di session
 
     # Get all user sessions
-    sessions_ref = db.collection(TRAINING_SESSIONS_COLLECTION)
+    sessions_ref = db.collection('training_sessions')
     sessions_query = sessions_ref.where('user_id', '==', user_id)
     session_list = list(sessions_query.stream())
 
@@ -169,7 +170,7 @@ def stats():
     user_id = current_user.id
 
     # Get user's training sessions
-    sessions_ref = db.collection(TRAINING_SESSIONS_COLLECTION)
+    sessions_ref = db.collection('training_sessions')
     sessions_query = sessions_ref.where('user_id', '==', user_id)
     sessions = list(sessions_query.stream())
 
@@ -201,7 +202,7 @@ def start_session():
     now = datetime.now()
     date_str = now.strftime("%Y-%m-%d %H:%M:%S")
 
-    sessions_ref = db.collection(TRAINING_SESSIONS_COLLECTION)
+    sessions_ref = db.collection('training_sessions')
 
     # Create new session
     new_session = {
@@ -241,7 +242,7 @@ def end_session():
         session_id = session['training_session_id']
 
         # Get session data
-        session_ref = db.collection(TRAINING_SESSIONS_COLLECTION).document(session_id)
+        session_ref = db.collection('training_sessions').document(session_id)
         session_data = session_ref.get().to_dict()
 
         # If there are no punches, delete this session
@@ -290,7 +291,7 @@ def upload_data_buffer():
         session_id = session['training_session_id']
 
         # Get session reference
-        session_ref = db.collection(TRAINING_SESSIONS_COLLECTION).document(session_id)
+        session_ref = db.collection('training_sessions').document(session_id)
         session_data = session_ref.get().to_dict()
 
         # Current data
@@ -357,7 +358,7 @@ def upload_data():
         # Calculate punch intensity
         intensity = (i ** 2 + j ** 2 + k ** 2) ** 0.5
 
-        session_ref = db.collection(TRAINING_SESSIONS_COLLECTION).document(session_id)
+        session_ref = db.collection('training_sessions').document(session_id)
         session_data = session_ref.get().to_dict()
 
         # Current data
@@ -397,7 +398,7 @@ def training():
     user_id = current_user.id
 
     # Get user's training sessions
-    sessions_ref = db.collection(TRAINING_SESSIONS_COLLECTION)
+    sessions_ref = db.collection('training_sessions')
     sessions_query = sessions_ref.where('user_id', '==', user_id)
     sessions = list(sessions_query.stream())
 
