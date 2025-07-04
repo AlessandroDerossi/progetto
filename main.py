@@ -115,11 +115,8 @@ def login():
                     # L'ID del documento è username, quindi uso username come ID
                     user = User(username, username, user_data.get('email'))
                     login_user(user)
-
-######
-
-                    next_page = request.args.get('next')
-                    return redirect(next_page) if next_page else redirect(url_for('dashboard'))
+                    next_page = request.values.get('next','/dashboard')  # Prendo il parametro 'next' dalla richiesta, se non esiste uso '/dashboard')
+                    return redirect(next_page)
                 else:
                     flash('Username o password non validi.')
             else:
@@ -131,19 +128,19 @@ def login():
 
     return render_template('login.html')
 
-
 @app.route('/logout')
-@login_required
+@login_required #per fare il logout l'utente deve essere autenticato
 def logout():
     logout_user()
     flash('Hai effettuato il logout con successo.')
     return redirect(url_for('login'))
 
+###
+
 
 @app.route('/dashboard')
-@login_required  # Usa il decoratore Flask-Login
+@login_required
 def dashboard():
-    # Get general user statistics
     user_id = current_user.id  # Usa current_user invece di session
 
     # Get all user sessions
