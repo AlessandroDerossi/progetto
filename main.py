@@ -11,37 +11,39 @@ app.config['SECRET_KEY'] = secret_key
 login_manager = LoginManager(app)
 login_manager.login_view = 'login'
 
+
 # Classe User (programmazione oggetti) per Flask-Login
 class User(UserMixin):
     def __init__(self, user_id, username, email):
         super().__init__()
         self.id = user_id  # ID univoco
-        self.username = username # Attributi
-        self.email = email #Attributi
+        self.username = username  # Attributi
+        self.email = email  # Attributi
+
 
 # Inizializzazione Firestore client
 db = firestore.Client.from_service_account_json('credentials.json', database='boxeproject')
 
+
 # Funzione per caricare l'utente da Firestore
 @login_manager.user_loader
 def load_user(user_id):
-    try: #Gestione errori
-        user_doc = db.collection('users').document(user_id).get() # Documento utende da user_ID
+    try:  # Gestione errori
+        user_doc = db.collection('users').document(user_id).get()  # Documento utende da user_ID
         if user_doc.exists:
-            user_data = user_doc.to_dict() # Converti il documento in un dizionario
-            return User(user_id, user_data['username'], user_data['email']) # Crea un oggetto User (usiamo le parentesi quadre perche mail e username sono obbligatori altrimenti .get + tonde)
-            #prendo username e mail con le parentesi quadre cosi se non esistono ritorna un errore (dati obbligatori alla registrazione)
+            user_data = user_doc.to_dict()  # Converti il documento in un dizionario
+            return User(user_id, user_data['username'], user_data[
+                'email'])  # Crea un oggetto User (usiamo le parentesi quadre perche mail e username sono obbligatori altrimenti .get + tonde)
+            # prendo username e mail con le parentesi quadre cosi se non esistono ritorna un errore (dati obbligatori alla registrazione)
         return None
     except Exception as e:
         print(f"Error loading user: {e}")
         return None
 
 @app.route('/')
-
-@login_required  #Manda direttamente al login se non autenticato
+@login_required  # Manda direttamente al login se non autenticato
 def main():
     return redirect('/templates/dashboard.html')
-
 
 @app.route('/register', methods=['GET', 'POST'])
 def register():
@@ -50,7 +52,7 @@ def register():
         password = request.form['password']
         email = request.form['email']
 
-        # Basic validation
+        # Validazione base
         if not username or not password or not email:
             flash('Username, password ed email sono obbligatori!')  # invio messaggio di errore pagina html
             return render_template(
@@ -66,7 +68,8 @@ def register():
             # controlla se email esiste già
             if email:
                 users_ref = db.collection('users')  # riferimento alla collezione 'users'
-                email_query = users_ref.where('email', '==', email).limit(1)  # limit per fermare la ricerca al primo risultato
+                email_query = users_ref.where('email', '==', email).limit(
+                    1)  # limit per fermare la ricerca al primo risultato
                 if len(list(email_query.stream())) > 0:  # .stream esegue la query
                     flash('Email già esistente. Prova con credenziali diverse.')
                     return render_template('register.html')
@@ -78,7 +81,7 @@ def register():
                 'email': email
             }
 
-            db.collection('users').document(username).set(new_user) #.set per creare un documento con ID specifico
+            db.collection('users').document(username).set(new_user)  # .set per creare un documento con ID specifico
 
             flash('Registrazione completata con successo! Ora puoi accedere.')
             return redirect(url_for('login'))
@@ -90,36 +93,44 @@ def register():
 
     return render_template('register.html')
 
-###
 
 @app.route('/login', methods=['GET', 'POST'])
 def login():
     if current_user.is_authenticated:
-        return redirect(url_for('dashboard'))
+        return redirect(url_for('dashboard'))  # Reindirizza all'URL associato alla funzione dashboard
 
     if request.method == 'POST':
         username = request.form['username']
         password = request.form['password']
 
         try:
-            users_ref = db.collection('users')
-            query = users_ref.where('username', '==', username).limit(1)
-            users = list(query.stream())
+            # Correggo gli errori nella tua modifica
+            entity = db.collection('users').document(username).get()
+            if entity.exists:
+                user_data = entity.to_dict()
+                print(user_data)
 
-            if users and users[0].to_dict()['password'] == password:  # Confronto diretto
-                user_data = users[0].to_dict()
-                user = User(users[0].id, username, user_data.get('email'))
-                login_user(user)
+                # Verifica password
+                if user_data.get('password') == password:
+                    # L'ID del documento è username, quindi uso username come ID
+                    user = User(username, username, user_data.get('email'))
+                    login_user(user)
 
-                next_page = request.args.get('next')
-                return redirect(next_page) if next_page else redirect(url_for('dashboard'))
+######
 
-            flash('Username o password non validi.')
+                    next_page = request.args.get('next')
+                    return redirect(next_page) if next_page else redirect(url_for('dashboard'))
+                else:
+                    flash('Username o password non validi.')
+            else:
+                flash('Username o password non validi.')
+
         except Exception as e:
             print(f"Error during login: {e}")
             flash('Errore durante il login. Riprova più tardi.')
 
     return render_template('login.html')
+
 
 @app.route('/logout')
 @login_required
@@ -127,6 +138,7 @@ def logout():
     logout_user()
     flash('Hai effettuato il logout con successo.')
     return redirect(url_for('login'))
+
 
 @app.route('/dashboard')
 @login_required  # Usa il decoratore Flask-Login
@@ -164,6 +176,7 @@ def dashboard():
                            punch_count=total_punches,
                            avg_intensity=avg_intensity)
 
+
 @app.route('/stats')
 @login_required
 def stats():
@@ -195,6 +208,7 @@ def stats():
 
     return render_template('stats.html', sessions=sessions_data, username=current_user.username)
 
+
 @app.route('/start_session', methods=['POST'])
 @login_required
 def start_session():
@@ -222,6 +236,7 @@ def start_session():
 
     return redirect(url_for('active_training'))
 
+
 @app.route('/active_training')
 @login_required
 def active_training():
@@ -234,6 +249,7 @@ def active_training():
     return render_template('active_training.html',
                            username=current_user.username,
                            start_time=start_time)
+
 
 @app.route('/end_session', methods=['POST'])
 @login_required
@@ -279,6 +295,7 @@ def end_session():
             return json.dumps({'status': 'saved', 'message': 'Allenamento salvato con successo'}), 200
 
     return json.dumps({'status': 'error', 'message': 'Nessuna sessione attiva'}), 400
+
 
 @app.route('/upload_data_buffer', methods=['POST'])
 @login_required
@@ -342,6 +359,7 @@ def upload_data_buffer():
         print(f"Error saving data: {e}")
         return f'Error saving data: {str(e)}', 500
 
+
 @app.route('/upload_data', methods=['POST'])
 @login_required
 def upload_data():
@@ -392,6 +410,7 @@ def upload_data():
         print(f"Error saving data: {e}")
         return f'Error saving data: {str(e)}', 500
 
+
 @app.route('/training')
 @login_required
 def training():
@@ -425,6 +444,7 @@ def training():
     return render_template('training.html',
                            username=current_user.username,
                            sessions=sessions_data)
+
 
 if __name__ == '__main__':
     app.run(host='0.0.0.0', port=222, debug=True, ssl_context='adhoc')
