@@ -104,7 +104,6 @@ def login():
         password = request.form['password']
 
         try:
-            # Correggo gli errori nella tua modifica
             entity = db.collection('users').document(username).get()
             if entity.exists:
                 user_data = entity.to_dict()
@@ -135,15 +134,12 @@ def logout():
     flash('Hai effettuato il logout con successo.')
     return redirect(url_for('login'))
 
-###
-
-
 @app.route('/dashboard')
 @login_required
 def dashboard():
     user_id = current_user.id  # Usa current_user invece di session
 
-    # Get all user sessions
+    # Non si riesce ad ottenere una lista delle sessioni con il .get
     sessions_ref = db.collection('training_sessions')
     sessions_query = sessions_ref.where('user_id', '==', user_id)
     session_list = list(sessions_query.stream())
@@ -156,13 +152,13 @@ def dashboard():
 
     for sess in session_list:
         session_data = sess.to_dict()
-        punch_count = len(session_data.get('punches', []))
-        total_punches += punch_count
+        punch_count = len(session_data.get('punches', [])) # Restituisce il numero di pugni oppure [] se la voce 'punches' non esiste nel dizionario
+        total_punches += punch_count # Pugni totali di tutti gli allenamenti
         if session_data.get('avg_intensity', 0) > 0:
             total_intensity += session_data.get('avg_intensity', 0)
             intensity_count += 1
 
-    # Calculate average intensity across all sessions
+    # Calcola l'intensità media
     avg_intensity = 0
     if intensity_count > 0:
         avg_intensity = round(total_intensity / intensity_count, 2)
@@ -173,6 +169,7 @@ def dashboard():
                            punch_count=total_punches,
                            avg_intensity=avg_intensity)
 
+###
 
 @app.route('/stats')
 @login_required
