@@ -169,14 +169,12 @@ def dashboard():
                            punch_count=total_punches,
                            avg_intensity=avg_intensity)
 
-###
-
 @app.route('/stats')
 @login_required
 def stats():
     user_id = current_user.id
 
-    # Get user's training sessions
+    # Prendi la user training sessions
     sessions_ref = db.collection('training_sessions')
     sessions_query = sessions_ref.where('user_id', '==', user_id)
     sessions = list(sessions_query.stream())
@@ -185,10 +183,8 @@ def stats():
     for sess in sessions:
         session_data = sess.to_dict()
         punches = session_data.get('punches', [])
-        # Skip sessions with no punches
-        if len(punches) == 0:
-            continue
 
+        # Come sopra controllo l'esistenza di date, duration e agv_intensity altrimenti metto dei valori nulli
         sessions_data.append({
             'id': sess.id,
             'date': session_data.get('date', ''),
@@ -197,11 +193,10 @@ def stats():
             'avg_intensity': session_data.get('avg_intensity', 0)
         })
 
-    # Sort by date (most recent first)
+    # Ordina per data gli allenamenti (mini funzione lambda)
     sessions_data.sort(key=lambda x: x['date'], reverse=True)
 
     return render_template('stats.html', sessions=sessions_data, username=current_user.username)
-
 
 @app.route('/start_session', methods=['POST'])
 @login_required
@@ -209,10 +204,9 @@ def start_session():
     user_id = current_user.id
     now = datetime.now()
     date_str = now.strftime("%Y-%m-%d %H:%M:%S")
-
     sessions_ref = db.collection('training_sessions')
 
-    # Create new session
+    # Crea una nuova sessione di allenamento
     new_session = {
         'user_id': user_id,
         'date': date_str,
@@ -221,8 +215,9 @@ def start_session():
         'punches': []
     }
 
-    session_ref = sessions_ref.add(new_session)
-    session_id = session_ref[1].id
+
+    session_ref = sessions_ref.add(new_session) # Aggiunge il nuovo documento alla collezione training_sessions
+    session_id = session_ref[1].id # Estrae l'ID univoco del nuovo documento
 
     # Memorizza nella sessione Flask (per la sessione di allenamento attiva)
     session['training_session_id'] = session_id
@@ -230,6 +225,7 @@ def start_session():
 
     return redirect(url_for('active_training'))
 
+ ###
 
 @app.route('/active_training')
 @login_required
