@@ -280,8 +280,6 @@ def end_session():
 
     return json.dumps({'status': 'error', 'message': 'Nessuna sessione attiva'}), 400
 
-###
-
 @app.route('/upload_data_buffer', methods=['POST'])
 @login_required
 def upload_data_buffer():
@@ -292,7 +290,7 @@ def upload_data_buffer():
         data = json.loads(request.values['data'])
         session_id = session['training_session_id']
 
-        # Get session reference
+        # Prendi i dati della sessione
         session_ref = db.collection('training_sessions').document(session_id)
         session_data = session_ref.get().to_dict()
 
@@ -302,7 +300,7 @@ def upload_data_buffer():
         current_total_intensity = session_data.get('avg_intensity',
                                                    0) * current_punch_count if current_punch_count > 0 else 0
 
-        # Process new punches
+        # Processa i nuovi pugni
         new_punches = []
         total_new_intensity = 0
 
@@ -312,7 +310,7 @@ def upload_data_buffer():
             y = point.get('y', 0)
             z = point.get('z', 0)
 
-            # Calculate punch intensity
+            # Calcolare l'intensità dei pugni
             intensity = (x ** 2 + y ** 2 + z ** 2) ** 0.5
             total_new_intensity += intensity
 
@@ -325,15 +323,15 @@ def upload_data_buffer():
             }
             new_punches.append(new_punch)
 
-        # Update punch statistics
+        # Caricare le statistiche dei pugni
         new_punch_count = len(new_punches)
         total_punches = current_punch_count + new_punch_count
 
-        # Calculate new average intensity
+        # Calcolare la nuova intensità media
         total_intensity = current_total_intensity + total_new_intensity
         avg_intensity = round(total_intensity / total_punches, 2) if total_punches > 0 else 0
 
-        # Update session document
+        # Caricare la sessione
         session_ref.update({
             'avg_intensity': avg_intensity,
             'punches': firestore.ArrayUnion(new_punches)
@@ -344,64 +342,12 @@ def upload_data_buffer():
         print(f"Error saving data: {e}")
         return f'Error saving data: {str(e)}', 500
 
-
-@app.route('/upload_data', methods=['POST'])
-@login_required
-def upload_data():
-    if 'training_session_id' not in session:
-        return 'No active session', 400
-
-    try:
-        i = float(request.values['i'])
-        j = float(request.values['j'])
-        k = float(request.values['k'])
-        session_id = session['training_session_id']
-        now = datetime.now().strftime("%Y-%m-%d %H:%M:%S.%f")
-
-        # Calculate punch intensity
-        intensity = (i ** 2 + j ** 2 + k ** 2) ** 0.5
-
-        session_ref = db.collection('training_sessions').document(session_id)
-        session_data = session_ref.get().to_dict()
-
-        # Current data
-        punches = session_data.get('punches', [])
-        current_punch_count = len(punches)
-        current_total_intensity = session_data.get('avg_intensity',
-                                                   0) * current_punch_count if current_punch_count > 0 else 0
-
-        # Add new punch
-        new_punch = {
-            'timestamp': now,
-            'acceleration_x': i,
-            'acceleration_y': j,
-            'acceleration_z': k,
-            'intensity': intensity
-        }
-
-        # Update punch statistics
-        total_punches = current_punch_count + 1
-        total_intensity = current_total_intensity + intensity
-        avg_intensity = round(total_intensity / total_punches, 2)
-
-        # Update session document
-        session_ref.update({
-            'avg_intensity': avg_intensity,
-            'punches': firestore.ArrayUnion([new_punch])
-        })
-
-        return 'Data saved successfully', 200
-    except Exception as e:
-        print(f"Error saving data: {e}")
-        return f'Error saving data: {str(e)}', 500
-
-
 @app.route('/training')
 @login_required
 def training():
     user_id = current_user.id
 
-    # Get user's training sessions
+    # Prensi la user's training session
     sessions_ref = db.collection('training_sessions')
     sessions_query = sessions_ref.where('user_id', '==', user_id)
     sessions = list(sessions_query.stream())
@@ -411,7 +357,7 @@ def training():
         session_data = sess.to_dict()
         punches = session_data.get('punches', [])
 
-        # Skip sessions with no punches
+        # Salta le sessioni senza pugni
         if len(punches) == 0:
             continue
 
@@ -423,7 +369,7 @@ def training():
             'avg_intensity': session_data.get('avg_intensity', 0)
         })
 
-    # Sort by date (most recent first)
+    # Ordina per data
     sessions_data.sort(key=lambda x: x['date'], reverse=True)
 
     return render_template('training.html',

@@ -360,7 +360,7 @@
             calibrateAccelerometer();
 
             // Set up buffer upload - frequency ridotta a ogni 5 secondi
-            bufferTimer = setInterval(uploadDataBuffer, 5000);
+            bufferTimer = setInterval(uploadDataBuffer, 2000);
 
             return true;
         } catch (error) {
