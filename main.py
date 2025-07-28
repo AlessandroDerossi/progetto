@@ -225,7 +225,7 @@ def start_session():
 
     return redirect(url_for('active_training'))
 
- ###
+ ##
 
 @app.route('/active_training')
 @login_required
