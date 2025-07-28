@@ -225,8 +225,6 @@ def start_session():
 
     return redirect(url_for('active_training'))
 
- #
-
 @app.route('/active_training')
 @login_required
 def active_training():
@@ -234,12 +232,8 @@ def active_training():
         flash('Nessuna sessione di allenamento attiva')
         return redirect(url_for('dashboard'))
 
-    start_time = session.get('training_start_time', datetime.now().strftime("%Y-%m-%d %H:%M:%S"))
-
     return render_template('active_training.html',
-                           username=current_user.username,
-                           start_time=start_time)
-
+                           username=current_user.username)
 
 @app.route('/end_session', methods=['POST'])
 @login_required
@@ -247,38 +241,38 @@ def end_session():
     if 'training_session_id' in session:
         session_id = session['training_session_id']
 
-        # Get session data
+        # Prendi i dati della sessione
         session_ref = db.collection('training_sessions').document(session_id)
         session_data = session_ref.get().to_dict()
 
-        # If there are no punches, delete this session
+        # Cancella la sessione se non ci sono pugni registrati
         if len(session_data.get('punches', [])) == 0:
             session_ref.delete()
             flash('Sessione terminata. Nessun dato salvato poiché non sono stati registrati pugni.')
 
-            # Remove session info from user session
+            # Rimuovi le info della sessione
             session.pop('training_session_id', None)
             session.pop('training_start_time', None)
 
             return json.dumps({'status': 'deleted', 'message': 'Sessione eliminata perché non conteneva pugni'}), 200
         else:
-            # Calculate duration
+            # Calcolare la durate dell'allenamento
             start_time_str = session_data.get('date')
             start_time = datetime.strptime(start_time_str, "%Y-%m-%d %H:%M:%S")
             end_time = datetime.now()
             duration_seconds = int((end_time - start_time).total_seconds())
 
-            # Convert seconds to minutes for display purposes
+            # Convertire i secondi in minuti
             duration_minutes = round(duration_seconds / 60, 2)
 
-            # Update session with duration
+            # Carica la sessione con la sua durata
             session_ref.update({
                 'duration': duration_minutes
             })
 
             flash('Allenamento terminato e salvato con successo!')
 
-            # Remove session info from user session
+            # Rimuovi le info della sessione
             session.pop('training_session_id', None)
             session.pop('training_start_time', None)
 
@@ -286,6 +280,7 @@ def end_session():
 
     return json.dumps({'status': 'error', 'message': 'Nessuna sessione attiva'}), 400
 
+###
 
 @app.route('/upload_data_buffer', methods=['POST'])
 @login_required
