@@ -137,26 +137,36 @@ def logout():
 @app.route('/dashboard')
 @login_required
 def dashboard():
-    user_id = current_user.id  # Usa current_user invece di session
+    user_id = current_user.id
 
-    # Non si riesce ad ottenere una lista delle sessioni con il .get
     sessions_ref = db.collection('training_sessions')
     sessions_query = sessions_ref.where('user_id', '==', user_id)
     session_list = list(sessions_query.stream())
 
-    # Calculate stats
-    session_count = len(session_list)
+    # FILTRO: conta solo sessioni con pugni
+    valid_sessions = []
     total_punches = 0
     total_intensity = 0
     intensity_count = 0
 
     for sess in session_list:
         session_data = sess.to_dict()
-        punch_count = len(session_data.get('punches', [])) # Restituisce il numero di pugni oppure [] se la voce 'punches' non esiste nel dizionario
-        total_punches += punch_count # Pugni totali di tutti gli allenamenti
+        punches = session_data.get('punches', [])
+
+        # SKIPPA sessioni senza pugni
+        if len(punches) == 0:
+            continue
+
+        valid_sessions.append(sess)
+        punch_count = len(punches)
+        total_punches += punch_count
+
         if session_data.get('avg_intensity', 0) > 0:
             total_intensity += session_data.get('avg_intensity', 0)
             intensity_count += 1
+
+    # Usa solo le sessioni valide per il conteggio
+    session_count = len(valid_sessions)
 
     # Calcola l'intensità media
     avg_intensity = 0
@@ -164,7 +174,7 @@ def dashboard():
         avg_intensity = round(total_intensity / intensity_count, 2)
 
     return render_template('dashboard.html',
-                           username=current_user.username,  # Usa current_user
+                           username=current_user.username,
                            session_count=session_count,
                            punch_count=total_punches,
                            avg_intensity=avg_intensity)
@@ -198,15 +208,45 @@ def stats():
 
     return render_template('stats.html', sessions=sessions_data, username=current_user.username)
 
+
 @app.route('/start_session', methods=['POST'])
 @login_required
 def start_session():
     user_id = current_user.id
     now = datetime.now()
     date_str = now.strftime("%Y-%m-%d %H:%M:%S")
-    sessions_ref = db.collection('training_sessions')
 
-    # Crea una nuova sessione di allenamento
+    #crea la sessione solo nelle variabili di sessione Flask
+    session['training_user_id'] = user_id
+    session['training_start_time'] = date_str
+    session['training_session_created'] = False  #flag per indicare che non è ancora nel DB
+
+    return redirect(url_for('active_training'))
+
+@app.route('/active_training')
+@login_required
+def active_training():
+    if 'training_user_id' not in session:
+        flash('Nessuna sessione di allenamento preparata')
+        return redirect(url_for('dashboard'))
+
+    return render_template('active_training.html',
+                           username=current_user.username)
+
+@app.route('/create_actual_session', methods=['POST'])
+@login_required
+def create_actual_session():
+    if 'training_user_id' not in session:
+        return json.dumps({'status': 'error', 'message': 'Nessuna sessione preparata'}), 400
+
+    if session.get('training_session_created', False):
+        return json.dumps({'status': 'error', 'message': 'Sessione già creata'}), 400
+
+    user_id = session['training_user_id']
+    date_str = session['training_start_time']
+
+    # ORA creiamo la sessione nel database
+    sessions_ref = db.collection('training_sessions')
     new_session = {
         'user_id': user_id,
         'date': date_str,
@@ -215,74 +255,101 @@ def start_session():
         'punches': []
     }
 
+    try:
+        session_ref = sessions_ref.add(new_session)
+        session_id = session_ref[1].id
 
-    session_ref = sessions_ref.add(new_session) # Aggiunge il nuovo documento alla collezione training_sessions
-    session_id = session_ref[1].id # Estrae l'ID univoco del nuovo documento
+        # Aggiorna le variabili di sessione
+        session['training_session_id'] = session_id
+        session['training_session_created'] = True
 
-    # Memorizza nella sessione Flask (per la sessione di allenamento attiva)
-    session['training_session_id'] = session_id
-    session['training_start_time'] = date_str
+        return json.dumps({'status': 'success', 'session_id': session_id}), 200
 
-    return redirect(url_for('active_training'))
+    except Exception as e:
+        print(f"Error creating session: {e}")
+        return json.dumps({'status': 'error', 'message': 'Errore nella creazione della sessione'}), 500
 
-@app.route('/active_training')
-@login_required
-def active_training():
-    if 'training_session_id' not in session:
-        flash('Nessuna sessione di allenamento attiva')
-        return redirect(url_for('dashboard'))
-
-    return render_template('active_training.html',
-                           username=current_user.username)
 
 @app.route('/end_session', methods=['POST'])
 @login_required
 def end_session():
+    # Se la sessione non è mai stata creata nel database
+    if not session.get('training_session_created', False):
+        # Pulisci solo le variabili di sessione Flask
+        session.pop('training_user_id', None)
+        session.pop('training_start_time', None)
+        session.pop('training_session_created', None)
+        return json.dumps({'status': 'cancelled', 'message': 'Sessione annullata (mai iniziata)'}), 200
+
+    # Se la sessione esiste nel database
     if 'training_session_id' in session:
         session_id = session['training_session_id']
 
-        # Prendi i dati della sessione
-        session_ref = db.collection('training_sessions').document(session_id)
-        session_data = session_ref.get().to_dict()
+        try:
+            # Prendi i dati della sessione
+            session_ref = db.collection('training_sessions').document(session_id)
+            session_doc = session_ref.get()
 
-        # Cancella la sessione se non ci sono pugni registrati
-        if len(session_data.get('punches', [])) == 0:
-            session_ref.delete()
-            flash('Sessione terminata. Nessun dato salvato poiché non sono stati registrati pugni.')
+            if not session_doc.exists:
+                # La sessione non esiste più, pulisci le variabili
+                session.pop('training_session_id', None)
+                session.pop('training_user_id', None)
+                session.pop('training_start_time', None)
+                session.pop('training_session_created', None)
+                return json.dumps({'status': 'error', 'message': 'Sessione non trovata'}), 400
 
-            # Rimuovi le info della sessione
-            session.pop('training_session_id', None)
-            session.pop('training_start_time', None)
+            session_data = session_doc.to_dict()
 
-            return json.dumps({'status': 'deleted', 'message': 'Sessione eliminata perché non conteneva pugni'}), 200
-        else:
-            # Calcolare la durate dell'allenamento
-            start_time_str = session_data.get('date')
-            start_time = datetime.strptime(start_time_str, "%Y-%m-%d %H:%M:%S")
-            end_time = datetime.now()
-            duration_seconds = int((end_time - start_time).total_seconds())
+            # Cancella la sessione se non ci sono pugni registrati
+            if len(session_data.get('punches', [])) == 0:
+                session_ref.delete()
 
-            # Convertire i secondi in minuti
-            duration_minutes = round(duration_seconds / 60, 2)
+                # Rimuovi le info della sessione
+                session.pop('training_session_id', None)
+                session.pop('training_user_id', None)
+                session.pop('training_start_time', None)
+                session.pop('training_session_created', None)
 
-            # Carica la sessione con la sua durata
-            session_ref.update({
-                'duration': duration_minutes
-            })
+                return json.dumps(
+                    {'status': 'deleted', 'message': 'Sessione eliminata perché non conteneva pugni'}), 200
+            else:
+                # Calcolare la durata dell'allenamento
+                start_time_str = session_data.get('date')
+                start_time = datetime.strptime(start_time_str, "%Y-%m-%d %H:%M:%S")
+                end_time = datetime.now()
+                duration_seconds = int((end_time - start_time).total_seconds())
 
-            flash('Allenamento terminato e salvato con successo!')
+                # Convertire i secondi in minuti
+                duration_minutes = round(duration_seconds / 60, 2)
 
-            # Rimuovi le info della sessione
-            session.pop('training_session_id', None)
-            session.pop('training_start_time', None)
+                # Aggiorna la sessione con la sua durata
+                session_ref.update({
+                    'duration': duration_minutes
+                })
 
-            return json.dumps({'status': 'saved', 'message': 'Allenamento salvato con successo'}), 200
+                flash('Allenamento terminato e salvato con successo!')
+
+                # Rimuovi le info della sessione
+                session.pop('training_session_id', None)
+                session.pop('training_user_id', None)
+                session.pop('training_start_time', None)
+                session.pop('training_session_created', None)
+
+                return json.dumps({'status': 'saved', 'message': 'Allenamento salvato con successo'}), 200
+
+        except Exception as e:
+            print(f"Error ending session: {e}")
+            return json.dumps({'status': 'error', 'message': f'Errore: {str(e)}'}), 500
 
     return json.dumps({'status': 'error', 'message': 'Nessuna sessione attiva'}), 400
+
 
 @app.route('/upload_data_buffer', methods=['POST'])
 @login_required
 def upload_data_buffer():
+    if not session.get('training_session_created', False):
+        return 'Session not created yet', 400
+
     if 'training_session_id' not in session:
         return 'No active session', 400
 
@@ -347,7 +414,7 @@ def upload_data_buffer():
 def training():
     user_id = current_user.id
 
-    # Prensi la user's training session
+    # Prendi la user's training session
     sessions_ref = db.collection('training_sessions')
     sessions_query = sessions_ref.where('user_id', '==', user_id)
     sessions = list(sessions_query.stream())
@@ -375,7 +442,6 @@ def training():
     return render_template('training.html',
                            username=current_user.username,
                            sessions=sessions_data)
-
 
 if __name__ == '__main__':
     app.run(host='0.0.0.0', port=222, debug=True, ssl_context='adhoc')

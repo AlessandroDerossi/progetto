@@ -464,20 +464,43 @@
 
     // Event listeners for buttons
     startButton.addEventListener('click', function() {
-        if (!isRunning) {
-            if (initAccelerometer()) {
-                isRunning = true;
-                timer = setInterval(updateTimer, 1000);
-
-                startButton.style.display = 'none';
-                resumeButton.style.display = 'none';
-                pauseButton.disabled = false;
-                stopButton.disabled = false;
-            } else {
-                alert(MESSAGES.INIT_ERROR);
+    if (!isRunning) {
+        // Prima crea la sessione nel database
+        fetch('/create_actual_session', {
+            method: 'POST',
+            headers: {
+                'Content-Type': 'application/json',
             }
-        }
-    });
+        })
+        .then(response => response.json())
+        .then(data => {
+            if (data.status === 'success') {
+                // Solo se la sessione è stata creata con successo, inizia l'allenamento
+                if (initAccelerometer()) {
+                    isRunning = true;
+                    timer = setInterval(updateTimer, 1000);
+
+                    startButton.style.display = 'none';
+                    resumeButton.style.display = 'none';
+                    pauseButton.disabled = false;
+                    stopButton.disabled = false;
+
+                    debugInfo.textContent = "Allenamento iniziato! Sessione creata nel database.";
+                } else {
+                    alert(MESSAGES.INIT_ERROR);
+                }
+            } else {
+                alert('Errore nella creazione della sessione: ' + data.message);
+                debugInfo.textContent = 'Errore nella creazione della sessione: ' + data.message;
+            }
+        })
+        .catch(error => {
+            console.error('Error creating session:', error);
+            alert('Errore di connessione nella creazione della sessione');
+            debugInfo.textContent = 'Errore di connessione nella creazione della sessione';
+        });
+    }
+});
 
     resumeButton.addEventListener('click', function() {
         if (!isRunning) {
