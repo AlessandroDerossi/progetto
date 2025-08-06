@@ -1,342 +1,230 @@
-from flask import Flask, render_template, request, redirect, url_for, session, flash
-import os
+from flask import Flask, render_template, request, redirect, url_for, flash, session, jsonify
 from datetime import datetime
 import json
-import threading
+import os
 import numpy as np
-import pickle
-from werkzeug.security import generate_password_hash, check_password_hash
-from google.cloud import firestore
 from collections import deque
-
-# requirements:
-# pip install pyopenssl werkzeug google-cloud-firestore numpy scikit-learn
-# pip install flask
+from google.cloud import firestore
+from flask_login import LoginManager, current_user, login_user, logout_user, login_required, UserMixin
+from secret import secret_key
 
 app = Flask(__name__)
-app.secret_key = 'your_secret_key_here'  # Important for session, change with a secure key
+app.config['SECRET_KEY'] = secret_key
+
+login_manager = LoginManager(app)
+login_manager.login_view = 'login'
 
 
-# Initialize Firestore client
-def get_firestore_client():
-    return firestore.Client.from_service_account_json('credentials.json', database='boxeproject')
+# Classe User (programmazione oggetti) per Flask-Login
+class User(UserMixin):
+    def __init__(self, user_id, username, email):
+        super().__init__()
+        self.id = user_id  # ID univoco
+        self.username = username  # Attributi
+        self.email = email  # Attributi
 
 
-# Collections in Firestore - only 2 collections now
-USERS_COLLECTION = 'users'
-TRAINING_SESSIONS_COLLECTION = 'training_sessions'
+# Inizializzazione Firestore client
+db = firestore.Client.from_service_account_json('credentials.json', database='boxeproject')
 
 
-# Initialize database structure
-def init_db():
-    # Firestore collections are created automatically when documents are added
-    # No need for explicit schema creation like in SQLite
-    pass
+# === MACHINE LEARNING COMPONENTS ===
+
+class DataCollector:
+    def __init__(self, base_folder="training_data"):
+        self.base_folder = base_folder
+        self.punch_folder = os.path.join(base_folder, "punches")
+        self.non_punch_folder = os.path.join(base_folder, "non_punches")
+
+        # Crea le cartelle se non esistono
+        os.makedirs(self.punch_folder, exist_ok=True)
+        os.makedirs(self.non_punch_folder, exist_ok=True)
+
+    def save_punch_sample(self, accelerations, sample_id=None):
+        """Salva un campione di pugno"""
+        if sample_id is None:
+            sample_id = datetime.now().strftime("%Y%m%d_%H%M%S_%f")
+
+        filename = f"pugno_{sample_id}.txt"
+        filepath = os.path.join(self.punch_folder, filename)
+
+        # Calcola le magnitudini
+        magnitudes = [np.sqrt(acc['x'] ** 2 + acc['y'] ** 2 + acc['z'] ** 2)
+                      for acc in accelerations]
+
+        # Salva solo le magnitudini come richiesto dal prof
+        with open(filepath, 'w') as f:
+            f.write(','.join(map(str, magnitudes)))
+
+        print(f"Salvato campione pugno: {filename}")
+        return filepath
+
+    def save_non_punch_sample(self, accelerations, sample_id=None):
+        """Salva un campione di non-pugno"""
+        if sample_id is None:
+            sample_id = datetime.now().strftime("%Y%m%d_%H%M%S_%f")
+
+        filename = f"non_pugno_{sample_id}.txt"
+        filepath = os.path.join(self.non_punch_folder, filename)
+
+        # Calcola le magnitudini
+        magnitudes = [np.sqrt(acc['x'] ** 2 + acc['y'] ** 2 + acc['z'] ** 2)
+                      for acc in accelerations]
+
+        with open(filepath, 'w') as f:
+            f.write(','.join(map(str, magnitudes)))
+
+        print(f"Salvato campione non-pugno: {filename}")
+        return filepath
 
 
-# Punch Detector class for ML-based punch detection
-class PunchDetector:
-    """
-    Un semplice sistema di machine learning per rilevare i pugni
-    basato sui dati dell'accelerometro.
-    """
-
-    def __init__(self, model_path=None):
-        """
-        Inizializza il rilevatore di pugni.
-
-        Args:
-            model_path: percorso al modello pre-addestrato (se disponibile)
-        """
-        self.window_size = 10  # Dimensione della finestra di dati per l'analisi
-        self.data_buffer = deque(maxlen=self.window_size)
-        self.model = None
-
-        # Carica un modello pre-addestrato se disponibile
-        if model_path and os.path.exists(model_path):
-            try:
-                with open(model_path, 'rb') as f:
-                    self.model = pickle.load(f)
-                print(f"Modello caricato da {model_path}")
-            except Exception as e:
-                print(f"Errore nel caricamento del modello: {e}")
-        else:
-            # Inizializza un nuovo modello
-            from sklearn.ensemble import RandomForestClassifier
-            self.model = RandomForestClassifier(n_estimators=50, random_state=42)
-            print("Nuovo modello di RandomForest creato")
-
-    def extract_features(self, acceleration_data):
-        """
-        Estrae feature dai dati dell'accelerometro.
-
-        Args:
-            acceleration_data: lista di dizionari con chiavi 'x', 'y', 'z'
-
-        Returns:
-            array di feature
-        """
-        if not acceleration_data:
+class FeatureExtractor:
+    def extract_features(self, data):
+        """Estrae features da una serie temporale di accelerazioni"""
+        if len(data) == 0:
             return None
 
-        # Estrae valori x, y, z
-        x_values = np.array([point.get('x', 0) for point in acceleration_data])
-        y_values = np.array([point.get('y', 0) for point in acceleration_data])
-        z_values = np.array([point.get('z', 0) for point in acceleration_data])
+        data = np.array(data)
+        features = {}
 
-        # Calcola l'intensità (magnitudine del vettore accelerazione)
-        magnitudes = np.sqrt(x_values ** 2 + y_values ** 2 + z_values ** 2)
+        # Features statistiche di base
+        features['mean'] = np.mean(data)
+        features['max'] = np.max(data)
+        features['min'] = np.min(data)
+        features['std'] = np.std(data)
+        features['var'] = np.var(data)
+        features['median'] = np.median(data)
+        features['range'] = features['max'] - features['min']
 
-        # Feature statistiche
-        features = [
-            np.mean(x_values), np.std(x_values), np.max(x_values), np.min(x_values),
-            np.mean(y_values), np.std(y_values), np.max(y_values), np.min(y_values),
-            np.mean(z_values), np.std(z_values), np.max(z_values), np.min(z_values),
-            np.mean(magnitudes), np.std(magnitudes), np.max(magnitudes), np.min(magnitudes),
+        # Percentili
+        features['q25'] = np.percentile(data, 25)
+        features['q75'] = np.percentile(data, 75)
+        features['iqr'] = features['q75'] - features['q25']
 
-            # Feature aggiuntive
-            np.median(magnitudes),
-            np.percentile(magnitudes, 75) - np.percentile(magnitudes, 25),  # IQR
-            np.max(magnitudes) - np.min(magnitudes),  # Range
+        # Features derivate (se ci sono abbastanza punti)
+        if len(data) > 1:
+            derivatives = np.diff(data)
+            features['mean_derivative'] = np.mean(derivatives)
+            features['max_derivative'] = np.max(np.abs(derivatives))
+            features['std_derivative'] = np.std(derivatives)
+        else:
+            features['mean_derivative'] = 0
+            features['max_derivative'] = 0
+            features['std_derivative'] = 0
 
-            # Variazioni nel tempo (differenze)
-            np.mean(np.diff(magnitudes)),
-            np.max(np.diff(magnitudes)),
-            np.std(np.diff(magnitudes))
-        ]
+        # Features di energia
+        features['energy'] = np.sum(data ** 2)
+        features['rms'] = np.sqrt(np.mean(data ** 2))
 
-        return np.array(features).reshape(1, -1)
+        # Zero crossing rate
+        mean_val = features['mean']
+        zero_crossings = np.sum(np.diff(np.sign(data - mean_val)) != 0)
+        features['zero_crossing_rate'] = zero_crossings / len(data)
 
-    def train(self, training_data, labels):
-        """
-        Addestra il modello su dati etichettati.
+        # Features di forma del picco
+        peak_idx = np.argmax(data)
+        features['peak_position'] = peak_idx / len(data)
+        features['peak_to_mean_ratio'] = features['max'] / features['mean'] if features['mean'] > 0 else 0
 
-        Args:
-            training_data: lista di finestre di dati accelerometro
-            labels: 1 per pugni, 0 per non-pugni
+        return features
 
-        Returns:
-            True se l'addestramento è andato a buon fine
-        """
+
+class MLPunchDetector:
+    def __init__(self, model_path="punch_classifier_model.pkl"):
+        self.model_path = model_path
+        self.classifier = None
+        self.feature_extractor = FeatureExtractor()
+        self.feature_names = None
+        self.load_model()
+
+        # Buffer per mantenere una finestra scorrevole di dati
+        self.window_size = 30
+        self.data_buffer = deque(maxlen=self.window_size)
+        self.min_confidence = 0.6
+
+    def load_model(self):
+        """Carica il modello ML"""
         try:
-            # Estrae feature da ogni finestra di dati
-            all_features = []
-            for window in training_data:
-                features = self.extract_features(window)
-                if features is not None:
-                    all_features.append(features.flatten())
-
-            # Converti in array NumPy
-            X = np.array(all_features)
-            y = np.array(labels)
-
-            if len(X) == 0:
-                print("Nessun dato di addestramento valido.")
+            import joblib
+            if os.path.exists(self.model_path):
+                model_data = joblib.load(self.model_path)
+                self.classifier = model_data['model']
+                self.feature_names = model_data['feature_names']
+                print("Modello ML caricato con successo")
+                return True
+            else:
+                print("Modello ML non trovato, usando metodo tradizionale")
                 return False
-
-            # Addestra il modello
-            self.model.fit(X, y)
-            print(f"Modello addestrato su {len(X)} esempi.")
-            return True
-
         except Exception as e:
-            print(f"Errore nell'addestramento del modello: {e}")
+            print(f"Errore nel caricare il modello ML: {e}")
             return False
 
-    def save_model(self, path):
-        """
-        Salva il modello su disco.
+    def add_data_point(self, x, y, z):
+        """Aggiunge un punto dati al buffer"""
+        magnitude = np.sqrt(x * x + y * y + z * z)
+        self.data_buffer.append(magnitude)
 
-        Args:
-            path: percorso dove salvare il modello
+    def detect_punch_ml(self):
+        """Rileva pugni usando ML"""
+        if not self.classifier or len(self.data_buffer) < 10:  # Minimo 10 punti
+            return False, 0.0
 
-        Returns:
-            True se il salvataggio è andato a buon fine
-        """
         try:
-            with open(path, 'wb') as f:
-                pickle.dump(self.model, f)
-            print(f"Modello salvato in {path}")
-            return True
+            # Converte il buffer in lista
+            data = list(self.data_buffer)
+
+            # Estrae features
+            features = self.feature_extractor.extract_features(data)
+            if features is None:
+                return False, 0.0
+
+            # Prepara il vettore di feature
+            feature_vector = np.array([features.get(name, 0) for name in self.feature_names]).reshape(1, -1)
+
+            # Predizione
+            prediction = self.classifier.predict(feature_vector)[0]
+            probabilities = self.classifier.predict_proba(feature_vector)[0]
+
+            # Probabilità per la classe "pugno"
+            punch_confidence = probabilities[1] if len(probabilities) > 1 else 0.0
+
+            # Rileva pugno se predizione è "pugno" e confidenza è alta
+            is_punch = (prediction == 'pugno' and punch_confidence >= self.min_confidence)
+
+            return is_punch, punch_confidence
+
         except Exception as e:
-            print(f"Errore nel salvataggio del modello: {e}")
-            return False
+            print(f"Errore nella predizione ML: {e}")
+            return False, 0.0
 
-    def detect_punch(self, acceleration_point):
-        """
-        Rileva se è stato dato un pugno in base ai dati dell'accelerometro.
-
-        Args:
-            acceleration_point: dizionario con chiavi 'x', 'y', 'z'
-
-        Returns:
-            True se viene rilevato un pugno, False altrimenti
-        """
-        # Aggiungi il punto al buffer
-        self.data_buffer.append(acceleration_point)
-
-        # Se non abbiamo abbastanza dati o il modello non è stato addestrato
-        if len(self.data_buffer) < self.window_size or self.model is None:
-            # Fallback al metodo basato su soglie
-            magnitude = np.sqrt(acceleration_point['x'] ** 2 +
-                                acceleration_point['y'] ** 2 +
-                                acceleration_point['z'] ** 2)
-            return magnitude > 15  # Soglia base
-
-        # Estrai feature dalla finestra di dati corrente
-        features = self.extract_features(list(self.data_buffer))
-
-        if features is None:
-            return False
-
-        # Predici la classe (1 = pugno, 0 = non pugno)
-        prediction = self.model.predict(features)[0]
-
-        return prediction == 1
-
-    def get_punch_intensity(self, acceleration_point):
-        """
-        Calcola l'intensità di un pugno.
-
-        Args:
-            acceleration_point: dizionario con chiavi 'x', 'y', 'z'
-
-        Returns:
-            float: l'intensità del pugno (magnitudine dell'accelerazione)
-        """
-        return np.sqrt(acceleration_point['x'] ** 2 +
-                       acceleration_point['y'] ** 2 +
-                       acceleration_point['z'] ** 2)
+    def detect_punch_traditional(self, magnitude, threshold=15):
+        """Metodo tradizionale come fallback"""
+        return magnitude > threshold, magnitude / threshold if threshold > 0 else 0
 
 
-# Funzione di utility per generare dati di esempio per allenare il modello iniziale
-def generate_training_data():
-    """
-    Genera dati di addestramento simulati per il modello.
-
-    Returns:
-        training_data, labels
-    """
-    np.random.seed(42)
-
-    # Numero di esempi per classe
-    n_examples = 100
-    window_size = 10
-
-    training_data = []
-    labels = []
-
-    # Genera esempi positivi (pugni)
-    for _ in range(n_examples):
-        window = []
-        # Genera una sequenza che simula un pugno
-        for i in range(window_size):
-            if i < 3:  # Inizio del pugno
-                x = np.random.normal(2, 1)
-                y = np.random.normal(2, 1)
-                z = np.random.normal(5, 2)
-            elif i < 6:  # Picco del pugno
-                x = np.random.normal(5, 2)
-                y = np.random.normal(5, 2)
-                z = np.random.normal(15, 3)
-            else:  # Fine del pugno
-                x = np.random.normal(3, 1)
-                y = np.random.normal(3, 1)
-                z = np.random.normal(4, 2)
-
-            window.append({'x': x, 'y': y, 'z': z})
-
-        training_data.append(window)
-        labels.append(1)  # Pugno
-
-    # Genera esempi negativi (non pugni)
-    for _ in range(n_examples):
-        window = []
-        # Genera una sequenza che simula movimenti casuali
-        for _ in range(window_size):
-            x = np.random.normal(1, 0.5)
-            y = np.random.normal(1, 0.5)
-            z = np.random.normal(2, 1)
-
-            window.append({'x': x, 'y': y, 'z': z})
-
-        training_data.append(window)
-        labels.append(0)  # Non pugno
-
-    return training_data, labels
+# Istanza globale del rilevatore
+ml_detector = MLPunchDetector()
+data_collector = DataCollector()
 
 
-# Inizializza e pre-addestra un modello di base
-def initialize_model(save_path='punch_detector_model.pkl'):
-    """
-    Inizializza e pre-addestra un modello di base.
-
-    Args:
-        save_path: percorso dove salvare il modello addestrato
-
-    Returns:
-        istanza di PunchDetector addestrata
-    """
-    detector = PunchDetector()
-
-    # Genera dati di addestramento simulati
-    training_data, labels = generate_training_data()
-
-    # Addestra il modello
-    success = detector.train(training_data, labels)
-
-    if success:
-        # Salva il modello
-        detector.save_model(save_path)
-
-    return detector
-
-
-# Inizializza il rilevatore di pugni come variabile globale
-MODEL_PATH = 'punch_detector_model.pkl'
-punch_detector = None
-
-
-# Controllo se il modello esiste già, altrimenti lo creiamo
-def init_ml():
-    if not os.path.exists(MODEL_PATH):
-        print("Inizializzazione del modello di machine learning...")
-        initialize_model(MODEL_PATH)
-    else:
-        print(f"Modello di machine learning caricato da {MODEL_PATH}")
-
-    # Inizializza il rilevatore di pugni
-    global punch_detector
-    punch_detector = PunchDetector(model_path=MODEL_PATH)
-
-
-# Inizializza l'applicazione
-def init_app():
-    # Inizializza il database
-    init_db()
-
-    # Inizializza il modello ML in un thread separato per non bloccare l'avvio dell'app
-    ml_thread = threading.Thread(target=init_ml)
-    ml_thread.daemon = True
-    ml_thread.start()
-
-
-# Middleware for checking if user is logged in
-def login_required(view):
-    def wrapped_view(*args, **kwargs):
-        if 'user_id' not in session:
-            return redirect(url_for('login'))
-        return view(*args, **kwargs)
-
-    wrapped_view.__name__ = view.__name__
-    return wrapped_view
+# Funzione per caricare l'utente da Firestore
+@login_manager.user_loader
+def load_user(user_id):
+    try:
+        user_doc = db.collection('users').document(user_id).get()
+        if user_doc.exists:
+            user_data = user_doc.to_dict()
+            return User(user_id, user_data['username'], user_data['email'])
+        return None
+    except Exception as e:
+        print(f"Error loading user: {e}")
+        return None
 
 
 @app.route('/')
+@login_required
 def main():
-    if 'user_id' in session:
-        return redirect(url_for('dashboard'))
-    return redirect(url_for('login'))
+    return redirect('/templates/dashboard.html')
 
 
 @app.route('/register', methods=['GET', 'POST'])
@@ -346,40 +234,38 @@ def register():
         password = request.form['password']
         email = request.form['email']
 
-        # Basic validation
-        if not username or not password:
-            flash('Username e password sono obbligatori!')
+        # Validazione base
+        if not username or not password or not email:
+            flash('Username, password ed email sono obbligatori!')
             return render_template('register.html')
 
-        # Hash password
-        hashed_password = generate_password_hash(password)
-
         try:
-            db = get_firestore_client()
-            # Check if username already exists
-            users_ref = db.collection(USERS_COLLECTION)
-            username_query = users_ref.where('username', '==', username).limit(1)
-            if len(list(username_query.stream())) > 0:
+            # controlla se username esiste già
+            user_doc = db.collection('users').document(username).get()
+            if user_doc.exists:
                 flash('Username già esistente. Prova con credenziali diverse.')
                 return render_template('register.html')
 
-            # Check if email already exists (if provided)
+            # controlla se email esiste già
             if email:
+                users_ref = db.collection('users')
                 email_query = users_ref.where('email', '==', email).limit(1)
                 if len(list(email_query.stream())) > 0:
                     flash('Email già esistente. Prova con credenziali diverse.')
                     return render_template('register.html')
 
-            # Add new user
+            # Nuovo utente con ID = username
             new_user = {
                 'username': username,
-                'password': hashed_password,
+                'password': password,
                 'email': email
             }
-            user_ref = users_ref.add(new_user)
+
+            db.collection('users').document(username).set(new_user)
 
             flash('Registrazione completata con successo! Ora puoi accedere.')
             return redirect(url_for('login'))
+
         except Exception as e:
             print(f"Error during registration: {e}")
             flash('Errore durante la registrazione. Riprova più tardi.')
@@ -390,24 +276,30 @@ def register():
 
 @app.route('/login', methods=['GET', 'POST'])
 def login():
+    if current_user.is_authenticated:
+        return redirect(url_for('dashboard'))
+
     if request.method == 'POST':
         username = request.form['username']
         password = request.form['password']
 
         try:
-            db = get_firestore_client()
-            users_ref = db.collection(USERS_COLLECTION)
-            query = users_ref.where('username', '==', username).limit(1)
-            users = list(query.stream())
+            entity = db.collection('users').document(username).get()
+            if entity.exists:
+                user_data = entity.to_dict()
+                print(user_data)
 
-            if users and check_password_hash(users[0].to_dict()['password'], password):
-                user_data = users[0].to_dict()
-                session.clear()
-                session['user_id'] = users[0].id
-                session['username'] = username
-                return redirect(url_for('dashboard'))
+                # Verifica password
+                if user_data.get('password') == password:
+                    user = User(username, username, user_data.get('email'))
+                    login_user(user)
+                    next_page = request.values.get('next', '/dashboard')
+                    return redirect(next_page)
+                else:
+                    flash('Username o password non validi.')
+            else:
+                flash('Username o password non validi.')
 
-            flash('Username o password non validi.')
         except Exception as e:
             print(f"Error during login: {e}")
             flash('Errore durante il login. Riprova più tardi.')
@@ -416,8 +308,9 @@ def login():
 
 
 @app.route('/logout')
+@login_required
 def logout():
-    session.clear()
+    logout_user()
     flash('Hai effettuato il logout con successo.')
     return redirect(url_for('login'))
 
@@ -425,36 +318,44 @@ def logout():
 @app.route('/dashboard')
 @login_required
 def dashboard():
-    # Get general user statistics
-    user_id = session.get('user_id')
-    db = get_firestore_client()
+    user_id = current_user.id
 
-    # Get all user sessions
-    sessions_ref = db.collection(TRAINING_SESSIONS_COLLECTION)
+    sessions_ref = db.collection('training_sessions')
     sessions_query = sessions_ref.where('user_id', '==', user_id)
     session_list = list(sessions_query.stream())
 
-    # Calculate stats
-    session_count = len(session_list)
+    # FILTRO: conta solo sessioni con pugni
+    valid_sessions = []
     total_punches = 0
     total_intensity = 0
     intensity_count = 0
 
     for sess in session_list:
         session_data = sess.to_dict()
-        punch_count = len(session_data.get('punches', []))
+        punches = session_data.get('punches', [])
+
+        # SKIPPA sessioni senza pugni
+        if len(punches) == 0:
+            continue
+
+        valid_sessions.append(sess)
+        punch_count = len(punches)
         total_punches += punch_count
+
         if session_data.get('avg_intensity', 0) > 0:
             total_intensity += session_data.get('avg_intensity', 0)
             intensity_count += 1
 
-    # Calculate average intensity across all sessions
+    # Usa solo le sessioni valide per il conteggio
+    session_count = len(valid_sessions)
+
+    # Calcola l'intensità media
     avg_intensity = 0
     if intensity_count > 0:
         avg_intensity = round(total_intensity / intensity_count, 2)
 
     return render_template('dashboard.html',
-                           username=session.get('username'),
+                           username=current_user.username,
                            session_count=session_count,
                            punch_count=total_punches,
                            avg_intensity=avg_intensity)
@@ -463,11 +364,9 @@ def dashboard():
 @app.route('/stats')
 @login_required
 def stats():
-    user_id = session.get('user_id')
-    db = get_firestore_client()
+    user_id = current_user.id
 
-    # Get user's training sessions
-    sessions_ref = db.collection(TRAINING_SESSIONS_COLLECTION)
+    sessions_ref = db.collection('training_sessions')
     sessions_query = sessions_ref.where('user_id', '==', user_id)
     sessions = list(sessions_query.stream())
 
@@ -475,9 +374,6 @@ def stats():
     for sess in sessions:
         session_data = sess.to_dict()
         punches = session_data.get('punches', [])
-        # Skip sessions with no punches
-        if len(punches) == 0:
-            continue
 
         sessions_data.append({
             'id': sess.id,
@@ -487,99 +383,144 @@ def stats():
             'avg_intensity': session_data.get('avg_intensity', 0)
         })
 
-    # Sort by date (most recent first)
     sessions_data.sort(key=lambda x: x['date'], reverse=True)
 
-    return render_template('stats.html', sessions=sessions_data, username=session.get('username'))
+    return render_template('stats.html', sessions=sessions_data, username=current_user.username)
 
 
 @app.route('/start_session', methods=['POST'])
 @login_required
 def start_session():
-    user_id = session.get('user_id')
+    user_id = current_user.id
     now = datetime.now()
     date_str = now.strftime("%Y-%m-%d %H:%M:%S")
 
-    db = get_firestore_client()
-    sessions_ref = db.collection(TRAINING_SESSIONS_COLLECTION)
-
-    # Order fields as requested: user_id, date, avg_intensity, duration, punches
-    new_session = {
-        'user_id': user_id,
-        'date': date_str,
-        'avg_intensity': 0,
-        'duration': 0,
-        'punches': []  # Store punch data directly in the session
-    }
-
-    session_ref = sessions_ref.add(new_session)
-    session_id = session_ref[1].id
-
-    session['training_session_id'] = session_id
+    # crea la sessione solo nelle variabili di sessione Flask
+    session['training_user_id'] = user_id
     session['training_start_time'] = date_str
+    session['training_session_created'] = False
 
-    # Redirect to the new active training page
     return redirect(url_for('active_training'))
 
 
 @app.route('/active_training')
 @login_required
 def active_training():
-    if 'training_session_id' not in session:
-        flash('Nessuna sessione di allenamento attiva')
+    if 'training_user_id' not in session:
+        flash('Nessuna sessione di allenamento preparata')
         return redirect(url_for('dashboard'))
 
-    start_time = session.get('training_start_time', datetime.now().strftime("%Y-%m-%d %H:%M:%S"))
-
     return render_template('active_training.html',
-                           username=session.get('username'),
-                           start_time=start_time)
+                           username=current_user.username)
+
+
+@app.route('/create_actual_session', methods=['POST'])
+@login_required
+def create_actual_session():
+    if 'training_user_id' not in session:
+        return json.dumps({'status': 'error', 'message': 'Nessuna sessione preparata'}), 400
+
+    if session.get('training_session_created', False):
+        return json.dumps({'status': 'error', 'message': 'Sessione già creata'}), 400
+
+    user_id = session['training_user_id']
+    date_str = session['training_start_time']
+
+    # ORA creiamo la sessione nel database
+    sessions_ref = db.collection('training_sessions')
+    new_session = {
+        'user_id': user_id,
+        'date': date_str,
+        'avg_intensity': 0,
+        'duration': 0,
+        'punches': []
+    }
+
+    try:
+        session_ref = sessions_ref.add(new_session)
+        session_id = session_ref[1].id
+
+        # Aggiorna le variabili di sessione
+        session['training_session_id'] = session_id
+        session['training_session_created'] = True
+
+        return json.dumps({'status': 'success', 'session_id': session_id}), 200
+
+    except Exception as e:
+        print(f"Error creating session: {e}")
+        return json.dumps({'status': 'error', 'message': 'Errore nella creazione della sessione'}), 500
 
 
 @app.route('/end_session', methods=['POST'])
 @login_required
 def end_session():
+    # Se la sessione non è mai stata creata nel database
+    if not session.get('training_session_created', False):
+        # Pulisci solo le variabili di sessione Flask
+        session.pop('training_user_id', None)
+        session.pop('training_start_time', None)
+        session.pop('training_session_created', None)
+        return json.dumps({'status': 'cancelled', 'message': 'Sessione annullata (mai iniziata)'}), 200
+
+    # Se la sessione esiste nel database
     if 'training_session_id' in session:
         session_id = session['training_session_id']
-        db = get_firestore_client()
 
-        # Get session data
-        session_ref = db.collection(TRAINING_SESSIONS_COLLECTION).document(session_id)
-        session_data = session_ref.get().to_dict()
+        try:
+            # Prendi i dati della sessione
+            session_ref = db.collection('training_sessions').document(session_id)
+            session_doc = session_ref.get()
 
-        # If there are no punches, delete this session
-        if len(session_data.get('punches', [])) == 0:
-            session_ref.delete()
-            flash('Sessione terminata. Nessun dato salvato poiché non sono stati registrati pugni.')
+            if not session_doc.exists:
+                # La sessione non esiste più, pulisci le variabili
+                session.pop('training_session_id', None)
+                session.pop('training_user_id', None)
+                session.pop('training_start_time', None)
+                session.pop('training_session_created', None)
+                return json.dumps({'status': 'error', 'message': 'Sessione non trovata'}), 400
 
-            # Remove session info from user session
-            session.pop('training_session_id', None)
-            session.pop('training_start_time', None)
+            session_data = session_doc.to_dict()
 
-            return json.dumps(
-                {'status': 'deleted', 'message': 'Sessione eliminata perché non conteneva pugni'}), 200
-        else:
-            # Calculate duration
-            start_time_str = session_data.get('date')
-            start_time = datetime.strptime(start_time_str, "%Y-%m-%d %H:%M:%S")
-            end_time = datetime.now()
-            duration_seconds = int((end_time - start_time).total_seconds())
+            # Cancella la sessione se non ci sono pugni registrati
+            if len(session_data.get('punches', [])) == 0:
+                session_ref.delete()
 
-            # Convert seconds to minutes for display purposes
-            duration_minutes = round(duration_seconds / 60, 2)
+                # Rimuovi le info della sessione
+                session.pop('training_session_id', None)
+                session.pop('training_user_id', None)
+                session.pop('training_start_time', None)
+                session.pop('training_session_created', None)
 
-            # Update session with duration (store as minutes, not seconds)
-            session_ref.update({
-                'duration': duration_minutes
-            })
+                return json.dumps(
+                    {'status': 'deleted', 'message': 'Sessione eliminata perché non conteneva pugni'}), 200
+            else:
+                # Calcolare la durata dell'allenamento
+                start_time_str = session_data.get('date')
+                start_time = datetime.strptime(start_time_str, "%Y-%m-%d %H:%M:%S")
+                end_time = datetime.now()
+                duration_seconds = int((end_time - start_time).total_seconds())
 
-            flash('Allenamento terminato e salvato con successo!')
+                # Convertire i secondi in minuti
+                duration_minutes = round(duration_seconds / 60, 2)
 
-            # Remove session info from user session
-            session.pop('training_session_id', None)
-            session.pop('training_start_time', None)
+                # Aggiorna la sessione con la sua durata
+                session_ref.update({
+                    'duration': duration_minutes
+                })
 
-            return json.dumps({'status': 'saved', 'message': 'Allenamento salvato con successo'}), 200
+                flash('Allenamento terminato e salvato con successo!')
+
+                # Rimuovi le info della sessione
+                session.pop('training_session_id', None)
+                session.pop('training_user_id', None)
+                session.pop('training_start_time', None)
+                session.pop('training_session_created', None)
+
+                return json.dumps({'status': 'saved', 'message': 'Allenamento salvato con successo'}), 200
+
+        except Exception as e:
+            print(f"Error ending session: {e}")
+            return json.dumps({'status': 'error', 'message': f'Errore: {str(e)}'}), 500
 
     return json.dumps({'status': 'error', 'message': 'Nessuna sessione attiva'}), 400
 
@@ -587,16 +528,18 @@ def end_session():
 @app.route('/upload_data_buffer', methods=['POST'])
 @login_required
 def upload_data_buffer():
+    if not session.get('training_session_created', False):
+        return 'Session not created yet', 400
+
     if 'training_session_id' not in session:
         return 'No active session', 400
 
     try:
         data = json.loads(request.values['data'])
         session_id = session['training_session_id']
-        db = get_firestore_client()
 
-        # Get session reference
-        session_ref = db.collection(TRAINING_SESSIONS_COLLECTION).document(session_id)
+        # Prendi i dati della sessione
+        session_ref = db.collection('training_sessions').document(session_id)
         session_data = session_ref.get().to_dict()
 
         # Current data
@@ -605,130 +548,166 @@ def upload_data_buffer():
         current_total_intensity = session_data.get('avg_intensity',
                                                    0) * current_punch_count if current_punch_count > 0 else 0
 
-        # Process new punches with ML
-        new_punches = []
-        total_new_intensity = 0
-
+        # Aggiungi tutti i punti al buffer del ML detector
         for point in data:
-            now = datetime.now().strftime("%Y-%m-%d %H:%M:%S.%f")
             x = point.get('x', 0)
             y = point.get('y', 0)
             z = point.get('z', 0)
+            ml_detector.add_data_point(x, y, z)
 
-            # Converti il punto nel formato atteso dal rilevatore
-            accel_point = {'x': x, 'y': y, 'z': z}
+        # Controlla se è stato rilevato un pugno con ML
+        is_punch_ml, confidence = ml_detector.detect_punch_ml()
 
-            # Usa il modello ML per rilevare i pugni
-            is_punch = punch_detector.detect_punch(accel_point)
+        new_punches = []
+        total_new_intensity = 0
 
-            # Se è un pugno, aggiungi ai dati
-            if is_punch:
-                # Calcola l'intensità del pugno
-                intensity = punch_detector.get_punch_intensity(accel_point)
-                total_new_intensity += intensity
+        if is_punch_ml and ml_detector.classifier:
+            # Se ML rileva un pugno, usa il punto con intensità massima come rappresentativo
+            max_intensity_point = max(data, key=lambda p: (p.get('x', 0) ** 2 + p.get('y', 0) ** 2 + p.get('z',
+                                                                                                           0) ** 2) ** 0.5)
 
-                new_punch = {
-                    'timestamp': now,
-                    'acceleration_x': x,
-                    'acceleration_y': y,
-                    'acceleration_z': z,
-                    'intensity': intensity,
-                    'detected_by': 'machine_learning'  # Aggiungiamo un campo per tracciare il metodo di rilevamento
-                }
-                new_punches.append(new_punch)
+            now = datetime.now().strftime("%Y-%m-%d %H:%M:%S.%f")
+            x = max_intensity_point.get('x', 0)
+            y = max_intensity_point.get('y', 0)
+            z = max_intensity_point.get('z', 0)
 
-        # Update punch statistics
-        new_punch_count = len(new_punches)
-        total_punches = current_punch_count + new_punch_count
+            intensity = (x ** 2 + y ** 2 + z ** 2) ** 0.5
+            total_new_intensity = intensity
 
-        # Calculate new average intensity
-        total_intensity = current_total_intensity + total_new_intensity
-        avg_intensity = round(total_intensity / total_punches, 2) if total_punches > 0 else 0
+            new_punch = {
+                'timestamp': now,
+                'acceleration_x': x,
+                'acceleration_y': y,
+                'acceleration_z': z,
+                'intensity': intensity,
+                'ml_confidence': confidence,
+                'detection_method': 'ml'
+            }
+            new_punches.append(new_punch)
+        else:
+            # Fallback al metodo tradizionale
+            for point in data:
+                x = point.get('x', 0)
+                y = point.get('y', 0)
+                z = point.get('z', 0)
+                magnitude = (x ** 2 + y ** 2 + z ** 2) ** 0.5
 
-        # Update session document
+                is_punch_traditional, traditional_confidence = ml_detector.detect_punch_traditional(magnitude)
+
+                if is_punch_traditional:
+                    now = datetime.now().strftime("%Y-%m-%d %H:%M:%S.%f")
+                    total_new_intensity += magnitude
+
+                    new_punch = {
+                        'timestamp': now,
+                        'acceleration_x': x,
+                        'acceleration_y': y,
+                        'acceleration_z': z,
+                        'intensity': magnitude,
+                        'ml_confidence': 0.0,
+                        'detection_method': 'traditional'
+                    }
+                    new_punches.append(new_punch)
+
+        # Aggiorna le statistiche solo se ci sono nuovi pugni
         if new_punches:
+            new_punch_count = len(new_punches)
+            total_punches = current_punch_count + new_punch_count
+
+            # Calcola la nuova intensità media
+            total_intensity = current_total_intensity + total_new_intensity
+            avg_intensity = round(total_intensity / total_punches, 2) if total_punches > 0 else 0
+
+            # Aggiorna la sessione
             session_ref.update({
                 'avg_intensity': avg_intensity,
                 'punches': firestore.ArrayUnion(new_punches)
             })
 
         return 'Data saved successfully', 200
+
     except Exception as e:
         print(f"Error saving data: {e}")
         return f'Error saving data: {str(e)}', 500
 
 
-@app.route('/upload_data', methods=['POST'])
+# === NUOVI ENDPOINT PER MACHINE LEARNING ===
+
+@app.route('/collect_training_data', methods=['POST'])
 @login_required
-def upload_data():
-    if 'training_session_id' not in session:
-        return 'No active session', 400
-
+def collect_training_data():
+    """Endpoint per raccogliere dati di training etichettati"""
     try:
-        i = float(request.values['i'])
-        j = float(request.values['j'])
-        k = float(request.values['k'])
-        session_id = session['training_session_id']
-        now = datetime.now().strftime("%Y-%m-%d %H:%M:%S.%f")
+        data = json.loads(request.values['data'])
+        label = request.values.get('label', 'unknown')
 
-        # Converti il punto nel formato atteso dal rilevatore
-        accel_point = {'x': i, 'y': j, 'z': k}
+        # Converte i dati nel formato giusto
+        accelerations = [{'x': p.get('x', 0), 'y': p.get('y', 0), 'z': p.get('z', 0)} for p in data]
 
-        # Usa il modello ML per rilevare i pugni
-        is_punch = punch_detector.detect_punch(accel_point)
+        if label == 'pugno':
+            data_collector.save_punch_sample(accelerations)
+        elif label == 'non_pugno':
+            data_collector.save_non_punch_sample(accelerations)
 
-        # Se non è un pugno, ritorna subito
-        if not is_punch:
-            return 'Not a punch', 200
+        return 'Training data saved successfully', 200
 
-        # Calcola l'intensità del pugno
-        intensity = punch_detector.get_punch_intensity(accel_point)
-
-        db = get_firestore_client()
-        session_ref = db.collection(TRAINING_SESSIONS_COLLECTION).document(session_id)
-        session_data = session_ref.get().to_dict()
-
-        # Current data
-        punches = session_data.get('punches', [])
-        current_punch_count = len(punches)
-        current_total_intensity = session_data.get('avg_intensity',
-                                                   0) * current_punch_count if current_punch_count > 0 else 0
-
-        # Add new punch
-        new_punch = {
-            'timestamp': now,
-            'acceleration_x': i,
-            'acceleration_y': j,
-            'acceleration_z': k,
-            'intensity': intensity,
-            'detected_by': 'machine_learning'
-        }
-
-        # Update punch statistics
-        total_punches = current_punch_count + 1
-        total_intensity = current_total_intensity + intensity
-        avg_intensity = round(total_intensity / total_punches, 2)
-
-        # Update session document
-        session_ref.update({
-            'avg_intensity': avg_intensity,
-            'punches': firestore.ArrayUnion([new_punch])
-        })
-
-        return 'Data saved successfully', 200
     except Exception as e:
-        print(f"Error saving data: {e}")
-        return f'Error saving data: {str(e)}', 500
+        print(f"Error saving training data: {e}")
+        return f'Error saving training data: {str(e)}', 500
+
+
+@app.route('/retrain_model', methods=['POST'])
+@login_required
+def retrain_model():
+    """Ri-allena il modello con i nuovi dati"""
+    try:
+        from ml_training import PunchClassifier
+
+        classifier = PunchClassifier()
+        accuracy = classifier.train("training_data")
+        classifier.save_model("punch_classifier_model.pkl")
+
+        # Ricarica il modello nell'app
+        ml_detector.load_model()
+
+        return json.dumps({
+            'status': 'success',
+            'accuracy': accuracy,
+            'message': 'Modello ri-allenato con successo'
+        }), 200
+
+    except Exception as e:
+        print(f"Error retraining model: {e}")
+        return json.dumps({
+            'status': 'error',
+            'message': f'Errore nel ri-allenamento: {str(e)}'
+        }), 500
+
+
+@app.route('/get_training_stats')
+@login_required
+def get_training_stats():
+    """Restituisce statistiche sui dati di training raccolti"""
+    try:
+        punch_files = len([f for f in os.listdir(data_collector.punch_folder) if f.endswith('.txt')])
+        non_punch_files = len([f for f in os.listdir(data_collector.non_punch_folder) if f.endswith('.txt')])
+
+        return jsonify({
+            'punch_samples': punch_files,
+            'non_punch_samples': non_punch_files,
+            'total_samples': punch_files + non_punch_files,
+            'ml_model_loaded': ml_detector.classifier is not None
+        })
+    except Exception as e:
+        return jsonify({'error': str(e)}), 500
 
 
 @app.route('/training')
 @login_required
 def training():
-    user_id = session.get('user_id')
-    db = get_firestore_client()
+    user_id = current_user.id
 
-    # Get user's training sessions
-    sessions_ref = db.collection(TRAINING_SESSIONS_COLLECTION)
+    sessions_ref = db.collection('training_sessions')
     sessions_query = sessions_ref.where('user_id', '==', user_id)
     sessions = list(sessions_query.stream())
 
@@ -737,7 +716,7 @@ def training():
         session_data = sess.to_dict()
         punches = session_data.get('punches', [])
 
-        # Skip sessions with no punches
+        # Salta le sessioni senza pugni
         if len(punches) == 0:
             continue
 
@@ -749,14 +728,12 @@ def training():
             'avg_intensity': session_data.get('avg_intensity', 0)
         })
 
-    # Sort by date (most recent first)
     sessions_data.sort(key=lambda x: x['date'], reverse=True)
 
     return render_template('training.html',
-                           username=session.get('username'),
+                           username=current_user.username,
                            sessions=sessions_data)
 
 
 if __name__ == '__main__':
-    init_app()  # Inizializza database e modello ML
     app.run(host='0.0.0.0', port=222, debug=True, ssl_context='adhoc')
