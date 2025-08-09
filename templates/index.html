@@ -1,0 +1,322 @@
+<!DOCTYPE html>
+<html lang="it">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Raccolta Dati Accelerometro</title>
+    <style>
+        body {
+            font-family: Arial, sans-serif;
+            max-width: 600px;
+            margin: 0 auto;
+            padding: 20px;
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            min-height: 100vh;
+            color: white;
+        }
+
+        .container {
+            background: rgba(255, 255, 255, 0.1);
+            backdrop-filter: blur(10px);
+            border-radius: 15px;
+            padding: 30px;
+            text-align: center;
+            box-shadow: 0 8px 32px rgba(0, 0, 0, 0.3);
+        }
+
+        h1 {
+            font-size: 2.5em;
+            margin-bottom: 30px;
+            text-shadow: 2px 2px 4px rgba(0, 0, 0, 0.5);
+        }
+
+        .button-container {
+            margin: 30px 0;
+        }
+
+        .btn {
+            font-size: 24px;
+            padding: 20px 40px;
+            margin: 15px;
+            border: none;
+            border-radius: 50px;
+            cursor: pointer;
+            transition: all 0.3s ease;
+            text-transform: uppercase;
+            font-weight: bold;
+            letter-spacing: 1px;
+            box-shadow: 0 4px 15px rgba(0, 0, 0, 0.2);
+        }
+
+        .btn:hover {
+            transform: translateY(-3px);
+            box-shadow: 0 6px 20px rgba(0, 0, 0, 0.3);
+        }
+
+        .btn:active {
+            transform: translateY(-1px);
+        }
+
+        .btn-punch {
+            background: linear-gradient(135deg, #ff6b6b, #ee5a24);
+            color: white;
+        }
+
+        .btn-non-punch {
+            background: linear-gradient(135deg, #4ecdc4, #44bd32);
+            color: white;
+        }
+
+        .btn:disabled {
+            opacity: 0.6;
+            cursor: not-allowed;
+            transform: none;
+        }
+
+        .status {
+            margin: 20px 0;
+            padding: 15px;
+            background: rgba(255, 255, 255, 0.2);
+            border-radius: 10px;
+            font-size: 18px;
+        }
+
+        .recording {
+            background: rgba(255, 107, 107, 0.3) !important;
+            animation: pulse 1.5s infinite;
+        }
+
+        @keyframes pulse {
+            0% { opacity: 0.7; }
+            50% { opacity: 1; }
+            100% { opacity: 0.7; }
+        }
+
+        .stats {
+            margin-top: 30px;
+            padding: 20px;
+            background: rgba(255, 255, 255, 0.15);
+            border-radius: 10px;
+        }
+
+        .stats h3 {
+            margin-bottom: 15px;
+        }
+
+        .stats-grid {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(150px, 1fr));
+            gap: 15px;
+        }
+
+        .stat-item {
+            background: rgba(255, 255, 255, 0.1);
+            padding: 15px;
+            border-radius: 8px;
+            text-align: center;
+        }
+
+        .stat-number {
+            font-size: 2em;
+            font-weight: bold;
+            color: #ffd700;
+        }
+
+        .instructions {
+            background: rgba(255, 255, 255, 0.1);
+            padding: 20px;
+            border-radius: 10px;
+            margin-bottom: 30px;
+            text-align: left;
+        }
+
+        .instructions h3 {
+            text-align: center;
+            margin-bottom: 15px;
+        }
+
+        .instructions ul {
+            padding-left: 20px;
+        }
+
+        .instructions li {
+            margin: 10px 0;
+            line-height: 1.4;
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <h1>🥊 Raccolta Dati Pugni</h1>
+
+        <div class="instructions">
+            <h3>📋 Istruzioni</h3>
+            <ul>
+                <li><strong>Per PUGNI:</strong> Tieni il telefono in mano, premi "PUGNO", esegui dei pugni, poi premi "STOP"</li>
+                <li><strong>Per NON-PUGNI:</strong> Tieni il telefono in mano, premi "NON PUGNO", fai movimenti normali (camminare, gesticolare), poi premi "STOP"</li>
+                <li>Ogni registrazione dovrebbe durare 3-5 secondi</li>
+            </ul>
+        </div>
+
+        <div class="status" id="status">
+            Pronto per registrare
+        </div>
+
+        <div class="button-container">
+            <button class="btn btn-punch" id="punchBtn" onclick="startRecording('punch')">
+                🥊 PUGNO
+            </button>
+            <button class="btn btn-non-punch" id="nonPunchBtn" onclick="startRecording('non_punch')">
+                👋 NON PUGNO
+            </button>
+        </div>
+
+        <button class="btn" id="stopBtn" onclick="stopRecording()" style="background: #e74c3c; display: none;">
+            ⏹️ STOP
+        </button>
+
+        <div class="stats">
+            <h3>📊 Statistiche Raccolte</h3>
+            <div class="stats-grid">
+                <div class="stat-item">
+                    <div class="stat-number" id="punchCount">{{ stats.punch }}</div>
+                    <div>Pugni</div>
+                </div>
+                <div class="stat-item">
+                    <div class="stat-number" id="nonPunchCount">{{ stats.non_punch }}</div>
+                    <div>Non-Pugni</div>
+                </div>
+                <div class="stat-item">
+                    <div class="stat-number" id="totalCount">{{ stats.total }}</div>
+                    <div>Totale</div>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <script>
+        let isRecording = false;
+        let currentLabel = '';
+        let accelerationData = [];
+        let recordingInterval;
+
+        // Verifica se il dispositivo supporta l'accelerometro
+        if (window.DeviceMotionEvent) {
+            // Richiedi permessi per iOS 13+
+            if (typeof DeviceMotionEvent.requestPermission === 'function') {
+                document.addEventListener('click', function() {
+                    DeviceMotionEvent.requestPermission()
+                        .then(permissionState => {
+                            if (permissionState === 'granted') {
+                                console.log('Permessi accelerometro concessi');
+                            }
+                        })
+                        .catch(console.error);
+                }, { once: true });
+            }
+        } else {
+            document.getElementById('status').innerHTML = '❌ Accelerometro non supportato su questo dispositivo';
+        }
+
+        function startRecording(label) {
+            if (isRecording) return;
+
+            isRecording = true;
+            currentLabel = label;
+            accelerationData = [];
+
+            // Aggiorna UI
+            document.getElementById('status').innerHTML = `🔴 Registrando ${label === 'punch' ? 'PUGNI' : 'NON-PUGNI'}...`;
+            document.getElementById('status').classList.add('recording');
+            document.getElementById('punchBtn').disabled = true;
+            document.getElementById('nonPunchBtn').disabled = true;
+            document.getElementById('stopBtn').style.display = 'inline-block';
+
+            // Inizia a raccogliere dati
+            window.addEventListener('devicemotion', collectData);
+
+            console.log(`Iniziata registrazione: ${label}`);
+        }
+
+        function stopRecording() {
+            if (!isRecording) return;
+
+            isRecording = false;
+
+            // Smetti di raccogliere dati
+            window.removeEventListener('devicemotion', collectData);
+
+            // Aggiorna UI
+            document.getElementById('status').innerHTML = '📤 Salvando dati...';
+            document.getElementById('status').classList.remove('recording');
+
+            // Invia dati al server
+            if (accelerationData.length > 0) {
+                fetch('/save_data', {
+                    method: 'POST',
+                    headers: {
+                        'Content-Type': 'application/json',
+                    },
+                    body: JSON.stringify({
+                        label: currentLabel,
+                        accelerations: accelerationData
+                    })
+                })
+                .then(response => response.json())
+                .then(data => {
+                    if (data.status === 'success') {
+                        document.getElementById('status').innerHTML = `✅ ${data.message}`;
+                        updateStats(data.stats);
+                    } else {
+                        document.getElementById('status').innerHTML = `❌ Errore: ${data.message}`;
+                    }
+                })
+                .catch(error => {
+                    console.error('Errore:', error);
+                    document.getElementById('status').innerHTML = '❌ Errore di connessione';
+                });
+            } else {
+                document.getElementById('status').innerHTML = '❌ Nessun dato raccolto';
+            }
+
+            // Ripristina UI
+            setTimeout(() => {
+                document.getElementById('status').innerHTML = 'Pronto per registrare';
+                document.getElementById('punchBtn').disabled = false;
+                document.getElementById('nonPunchBtn').disabled = false;
+                document.getElementById('stopBtn').style.display = 'none';
+            }, 3000);
+        }
+
+        function collectData(event) {
+            if (!isRecording) return;
+
+            const acc = event.accelerationIncludingGravity;
+            if (acc) {
+                accelerationData.push({
+                    timestamp: Date.now(),
+                    x: acc.x || 0,
+                    y: acc.y || 0,
+                    z: acc.z || 0
+                });
+            }
+        }
+
+        function updateStats(stats) {
+            document.getElementById('punchCount').textContent = stats.punch;
+            document.getElementById('nonPunchCount').textContent = stats.non_punch;
+            document.getElementById('totalCount').textContent = stats.total;
+        }
+
+        // Aggiorna statistiche ogni 30 secondi
+        setInterval(() => {
+            if (!isRecording) {
+                fetch('/get_stats')
+                    .then(response => response.json())
+                    .then(stats => updateStats(stats))
+                    .catch(console.error);
+            }
+        }, 30000);
+    </script>
+</body>
+</html>
