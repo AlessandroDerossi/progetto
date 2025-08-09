@@ -1,6 +1,7 @@
 # Ambiente virtuale
 venv/
 env/
+training_data
 
 # Cache di Python
 __pycache__/
