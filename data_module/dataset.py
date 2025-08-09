@@ -2,20 +2,29 @@ import glob
 import json
 from logging import getLogger
 from log import configure_logger
-from data_module.types import RawAnnotatedAction
+from data_module.types import Label, RawAnnotatedAction
 from pathlib import Path
-
+from tqdm import tqdm
 logger = getLogger(__name__)
-configure_logger(__name__)
 
-class Dataset:
+class PunchDataset:
     def __init__(self, samples: list[RawAnnotatedAction]):
         self.data = samples
+        self.punch_count = sum(1 for s in samples if s.label == Label.PUNCH)
+        self.non_punch_count = sum(1 for s in samples if s.label == Label.NOT_PUNCH)
+
+        self.print_stats()
+
+    def print_stats(self):
+        logger.info("Dataset statistics:")
+        logger.info(" - Punch actions: %d", self.punch_count)
+        logger.info(" - Non-punch actions: %d", self.non_punch_count)
 
     @classmethod
-    def load_samples_from_path(cls, path: Path) -> 'Dataset':
+    def load_samples_from_path(cls, path: Path) -> 'PunchDataset':
         samples = []
-        for file_path in glob.glob(str(path / "*.json")):
+        files = glob.glob(str(path / "*.json"))
+        for file_path in tqdm(files, desc="Loading JSON files", total=len(files)):
             with open(file_path, 'r') as f:
                 # Parse the JSON file into RawAnnotatedAction objects
                 data = json.load(f)
@@ -31,6 +40,7 @@ class Dataset:
 
 
 if __name__ == "__main__":
-    logger.info("Debug dataset.py")
-    dataset = Dataset.load_samples_from_path(Path("training_data"))
-    logger.info(f"Loaded {len(dataset.get_samples())} samples.")
+    logger = getLogger(__name__)
+    configure_logger(__name__)
+    logger.debug("Debug dataset.py")
+    dataset = PunchDataset.load_samples_from_path(Path("training_data"))

@@ -1,6 +1,5 @@
 from dataclasses import dataclass
 import enum
-from unittest import case
 
 class Label(enum.Enum):
     NOT_PUNCH = 0
@@ -15,7 +14,6 @@ class Label(enum.Enum):
                 return cls.NOT_PUNCH
             case _:
                 raise ValueError(f"Unknown label: {label}")
-
 
 @dataclass
 class RawImpulseMeasure:

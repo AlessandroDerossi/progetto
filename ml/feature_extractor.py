@@ -1,9 +1,9 @@
+from typing import Any
 import numpy as np
 from scipy import stats
 
-
 class FeatureExtractor:
-    def extract_features(self, data):
+    def extract_features(self, data) -> dict[str, Any]:
         """Estrae features da una serie temporale di accelerazioni"""
         if len(data) == 0:
             return None
