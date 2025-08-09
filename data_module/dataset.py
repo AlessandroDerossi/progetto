@@ -1,10 +1,12 @@
 import glob
 import json
 from logging import getLogger
+from log import configure_logger
 from data_module.types import RawAnnotatedAction
 from pathlib import Path
 
 logger = getLogger(__name__)
+configure_logger(__name__)
 
 class Dataset:
     def __init__(self, samples: list[RawAnnotatedAction]):
@@ -17,7 +19,7 @@ class Dataset:
             with open(file_path, 'r') as f:
                 # Parse the JSON file into RawAnnotatedAction objects
                 data = json.load(f)
-                action = RawAnnotatedAction(**data)
+                action = RawAnnotatedAction.from_json(data)
                 samples.append(action)
         return cls(samples)
 
@@ -30,5 +32,5 @@ class Dataset:
 
 if __name__ == "__main__":
     logger.info("Debug dataset.py")
-    dataset = Dataset.load_samples_from_path(Path("data"))
+    dataset = Dataset.load_samples_from_path(Path("training_data"))
     logger.info(f"Loaded {len(dataset.get_samples())} samples.")
