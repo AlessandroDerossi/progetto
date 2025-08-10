@@ -16,3 +16,6 @@ credentials.json
 # Cartelle degli IDE
 .idea/
 .vscode/
+
+#dati raccolti
+training_data
