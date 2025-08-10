@@ -32,11 +32,22 @@ class PunchDataset:
                 samples.append(action)
         return cls(samples)
 
-    def add_sample(self, sample: RawAnnotatedAction):
+    def add_sample(self, sample: RawAnnotatedAction) -> None:
         self.data.append(sample)
 
-    def get_samples(self):
+    def get_samples(self) -> list[RawAnnotatedAction]:
         return self.data
+
+    def __len__(self):
+        return len(self.data)
+
+    @property
+    def punch_samples(self):
+        return [s for s in self.data if s.label == Label.PUNCH]
+
+    @property
+    def non_punch_samples(self):
+        return [s for s in self.data if s.label == Label.NOT_PUNCH]
 
 
 if __name__ == "__main__":

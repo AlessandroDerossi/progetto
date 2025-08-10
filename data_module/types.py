@@ -1,6 +1,8 @@
 from dataclasses import dataclass
 import enum
 
+import numpy as np
+
 class Label(enum.Enum):
     NOT_PUNCH = 0
     PUNCH = 1
@@ -51,3 +53,10 @@ class RawAnnotatedAction:
         label = Label.from_json_label(data.get("label", "NOT_PUNCH"))
         timestamp = data.get("timestamp", "")
         return cls(impulses=impulses, label=label, timestamp=timestamp)
+
+@dataclass
+class AnnotatedAction:
+    """This class holds the annotated action data after passing through the feature extractor."""
+    data: np.ndarray
+    label: Label
+    timestamp: str

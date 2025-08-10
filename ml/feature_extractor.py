@@ -2,7 +2,10 @@ from typing import Any
 import numpy as np
 from scipy import stats
 
-class FeatureExtractor:
+class StatisticalFeatureExtractor:
+    def __call__(self, data) -> dict[str, Any]:
+        return self.extract_features(data)
+
     def extract_features(self, data) -> dict[str, Any]:
         """Estrae features da una serie temporale di accelerazioni"""
         if len(data) == 0:
