@@ -1,8 +1,10 @@
 import glob
 import json
 from logging import getLogger
+
+import numpy as np
 from log import configure_logger
-from data_module.types import Label, RawAnnotatedAction
+from data_module.types import AnnotatedAction, Label, RawAnnotatedAction
 from pathlib import Path
 from tqdm import tqdm
 logger = getLogger(__name__)
@@ -32,11 +34,15 @@ class PunchDataset:
                 samples.append(action)
         return cls(samples)
 
+    @property
+    def processed_samples(self) -> list[AnnotatedAction]:
+        return [
+            AnnotatedAction.from_raw_annotated_action(sample)
+            for sample in self.data
+        ]
+
     def add_sample(self, sample: RawAnnotatedAction) -> None:
         self.data.append(sample)
-
-    def get_samples(self) -> list[RawAnnotatedAction]:
-        return self.data
 
     def __len__(self):
         return len(self.data)

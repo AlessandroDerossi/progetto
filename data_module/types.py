@@ -7,6 +7,11 @@ class Label(enum.Enum):
     NOT_PUNCH = 0
     PUNCH = 1
 
+    def __str__(self) -> str:
+        if self == Label.PUNCH:
+            return "punch"
+        return "non_punch"
+
     @classmethod
     def from_json_label(cls, label: str) -> "Label":
         match label:
@@ -57,6 +62,45 @@ class RawAnnotatedAction:
 @dataclass
 class AnnotatedAction:
     """This class holds the annotated action data after passing through the feature extractor."""
-    data: np.ndarray
+    data: np.ndarray # 2D vector that represents all the impulses
     label: Label
     timestamp: str
+
+    def from_raw_annotated_action(cls, action: RawAnnotatedAction) -> 'AnnotatedAction':
+        """Convert a RawAnnotatedAction to an AnnotatedAction."""
+        data = np.array([[measure.x, measure.y, measure.z] for measure in action.impulses])
+        return cls(
+            data=data, 
+            label=action.label, 
+            timestamp=action.timestamp
+        )
+    
+@dataclass
+class AnnotatedFeatures:
+    features: dict[str, float]
+    label: Label
+    timestamp: str
+    partition: str | None = None
+@dataclass
+class AnnotatedFeaturesCollection:
+    features: list[AnnotatedFeatures]
+
+    @property
+    def features(self) -> list[np.ndarray]:
+        """Returns the features as a DataFrame."""
+        return [feat.features for feat in self.features]
+    
+    @property
+    def labels(self) -> list[Label]:
+        """Returns the labels as a list."""
+        return [feat.label for feat in self.features]
+
+    @property
+    def timestamps(self) -> list[str]:
+        """Returns the timestamps as a list."""
+        return [feat.timestamp for feat in self.features]
+
+    @property
+    def partitions(self) -> list[str | None]:
+        """Returns the partitions as a list."""
+        return [feat.partition for feat in self.features]

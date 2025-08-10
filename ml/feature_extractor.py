@@ -1,97 +1,103 @@
+import pandas as pd
 from typing import Any
 import numpy as np
 from scipy import stats
+from sklearn.decomposition import PCA
+from sklearn.manifold import TSNE
+from data_module.types import AnnotatedAction, AnnotatedFeatures, AnnotatedFeaturesCollection
 
 class StatisticalFeatureExtractor:
-    def __call__(self, data) -> dict[str, Any]:
+    def __call__(self, data: list[AnnotatedAction]) -> dict[str, Any]:
         return self.extract_features(data)
 
-    def extract_features(self, data) -> dict[str, Any]:
+    def extract_features(self, data: list[AnnotatedAction]) -> AnnotatedFeaturesCollection:
         """Estrae features da una serie temporale di accelerazioni"""
-        if len(data) == 0:
-            return None
+        assert len(data) > 0, "Data must not be empty"
+        annotated_features = []
+        for action in data:
+            action_features = self.extract_features_from_action(action)
+            annotated_features.append(AnnotatedFeatures(
+                features=action_features,
+                label=action.label,
+                timestamp=action.timestamp
+            ))
+        return AnnotatedFeaturesCollection(features=annotated_features)
 
-        data = np.array(data)
+    def extract_features_from_action(self, action: AnnotatedAction) -> np.ndarray:
+        """Estrae features da un'azione annotata.
+        action.data is a 2D numpy array, we must compute the values for each dimension """
+        data = action.data
+        assert len(data) > 0, "Data must not be empty"
+
+        features_3d = self.get_feature_dict(data)
+        return pd.DataFrame(features_3d).to_numpy().flatten()
+
+    def get_feature_dict(self, data: np.ndarray) -> dict[str, float]:
         features = {}
-
-        # Features statistiche di base
-        features['mean'] = np.mean(data)
-        features['max'] = np.max(data)
-        features['min'] = np.min(data)
-        features['std'] = np.std(data)
-        features['var'] = np.var(data)
-        features['median'] = np.median(data)
+        # Compute statistics for each dimension
+        ## Basic stats
+        features['mean'] = np.mean(data, axis=0)
+        features['max'] = np.max(data, axis=0)
+        features['min'] = np.min(data, axis=0)
+        features['std'] = np.std(data, axis=0)
+        features['var'] = np.var(data, axis=0)
+        features['median'] = np.median(data, axis=0)
         features['range'] = features['max'] - features['min']
 
-        # Percentili
-        features['q25'] = np.percentile(data, 25)
-        features['q75'] = np.percentile(data, 75)
+        ## Percentiles
+        features['q25'] = np.percentile(data, 25, axis=0)
+        features['q75'] = np.percentile(data, 75, axis=0)
         features['iqr'] = features['q75'] - features['q25']
 
-        # Features basate sulla forma del segnale
-        features['skewness'] = stats.skew(data)
-        features['kurtosis'] = stats.kurtosis(data)
+        ## Signal shape features
+        features['skewness'] = stats.skew(data, axis=0)
+        features['kurtosis'] = stats.kurtosis(data, axis=0)
 
-        # Features derivate (se ci sono abbastanza punti)
-        if len(data) > 1:
-            derivatives = np.diff(data)
-            features['mean_derivative'] = np.mean(derivatives)
-            features['max_derivative'] = np.max(np.abs(derivatives))
-            features['std_derivative'] = np.std(derivatives)
-        else:
-            features['mean_derivative'] = 0
-            features['max_derivative'] = 0
-            features['std_derivative'] = 0
+        ## Derivatives
+        derivatives = np.diff(data, axis=0)
+        features['mean_derivative'] = np.mean(derivatives, axis=0)
+        features['max_derivative'] = np.max(np.abs(derivatives), axis=0)
+        features['std_derivative'] = np.std(derivatives, axis=0)
 
-        # Features di energia
-        features['energy'] = np.sum(data ** 2)
-        features['rms'] = np.sqrt(np.mean(data ** 2))
+        features['energy'] = np.sum(data ** 2, axis=0)
+        features['rms'] = np.sqrt(np.mean(data ** 2, axis=0))
 
-        # Zero crossing rate (quante volte attraversa la media)
+        ## Zero crossing rate
         mean_val = features['mean']
         zero_crossings = np.sum(np.diff(np.sign(data - mean_val)) != 0)
         features['zero_crossing_rate'] = zero_crossings / len(data)
 
-        # Features nel dominio della frequenza (FFT) - versione semplificata
-        if len(data) >= 4:
-            try:
-                from scipy.fft import fft
-                fft_vals = np.abs(fft(data))
-                fft_vals = fft_vals[:len(fft_vals) // 2]  # Solo frequenze positive
+        # FFT features
+        fft_vals = np.abs(np.fft.fft(data, axis=0))
+        features['fft_mean'] = np.mean(fft_vals, axis=0)
+        features['fft_max'] = np.max(fft_vals, axis=0)
+        features['fft_std'] = np.std(fft_vals, axis=0)
 
-                features['fft_mean'] = np.mean(fft_vals)
-                features['fft_max'] = np.max(fft_vals)
-                features['fft_std'] = np.std(fft_vals)
+        peak_idx = np.argmax(data, axis=0)
+        features['peak_position'] = peak_idx / len(data)  # Relative
+        features['peak_value'] = data[peak_idx]
 
-                # Frequenza dominante
-                if len(fft_vals) > 0:
-                    features['dominant_freq_idx'] = np.argmax(fft_vals)
-            except ImportError:
-                # Se scipy non è disponibile, usa features alternative
-                features['fft_mean'] = 0
-                features['fft_max'] = 0
-                features['fft_std'] = 0
-                features['dominant_freq_idx'] = 0
-        else:
-            features['fft_mean'] = 0
-            features['fft_max'] = 0
-            features['fft_std'] = 0
-            features['dominant_freq_idx'] = 0
-
-        # Features di forma del picco
-        peak_idx = np.argmax(data)
-        features['peak_position'] = peak_idx / len(data)  # Posizione relativa del picco
-
-        # Rapporto picco-media
-        features['peak_to_mean_ratio'] = features['max'] / features['mean'] if features['mean'] > 0 else 0
-
-        # Numero di picchi significativi (sopra la soglia)
+        features['peak_to_mean_ratio'] = features['max'] / features['mean']
         threshold = features['mean'] + features['std']
-        peaks = np.sum(data > threshold)
-        features['num_peaks'] = peaks
+        peaks = np.sum(data > threshold, axis=0)
+        features['peak_count'] = peaks
 
-        # Durata del segnale sopra la soglia (normalizzata)
-        above_threshold = np.sum(data > threshold) / len(data)
-        features['duration_above_threshold'] = above_threshold
+        above_threshold = (data > threshold) / len(data)
+        features['above_threshold_count'] = np.sum(above_threshold, axis=0)
 
         return features
+    
+def compute_tsne(
+    feature_collection: AnnotatedFeaturesCollection,
+    do_pca: bool = True,
+) -> np.ndarray:
+    """Compute t-SNE for the given features.
+    Returns an ndarray component-1, component-2"""
+    tnse = TSNE(n_components=2, random_state=42)
+    if do_pca:
+        pca = PCA(n_components=10)
+        reduced_features = pca.fit_transform(feature_collection.features)
+    else:
+        reduced_features = feature_collection.features
+        
+    return tnse.fit_transform(reduced_features)
