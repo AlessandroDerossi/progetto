@@ -1,6 +1,5 @@
 import logging
 from pathlib import Path
-from venv import logger
 from sklearn.svm import SVC
 import yaml
 from data_module.dataset import PunchDataset
@@ -9,6 +8,8 @@ from log import configure_logger
 from ml.feature_extractor import StatisticalFeatureExtractor
 from ml.model import PunchClassifier
 from plotting.plot import get_plot_tsne
+logger = logging.getLogger(__name__)
+
 
 def train_model(classifier: PunchClassifier, dataset: PunchDataset):
     train_partition = dataset.train_data
@@ -40,7 +41,6 @@ def run(config):
     logger.info("Training completed.")
 
 if __name__ == "__main__":
-    logger = logging.getLogger(__name__)
     configure_logger(__name__)
     with open("config/train.yaml", "r") as file:
         config = yaml.safe_load(file)
