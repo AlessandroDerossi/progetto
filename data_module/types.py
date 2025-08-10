@@ -14,13 +14,12 @@ class Label(enum.Enum):
 
     @classmethod
     def from_json_label(cls, label: str) -> "Label":
-        match label:
-            case "punch":
-                return cls.PUNCH
-            case "non_punch":
-                return cls.NOT_PUNCH
-            case _:
-                raise ValueError(f"Unknown label: {label}")
+        if label == "punch":
+            return cls.PUNCH
+        elif label == "non_punch":
+            return cls.NOT_PUNCH
+        else:
+            raise ValueError(f"Unknown label: {label}")
 
 @dataclass
 class RawImpulseMeasure:
