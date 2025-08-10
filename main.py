@@ -4,22 +4,13 @@ import json
 from google.cloud import firestore
 from flask_login import LoginManager, current_user, login_user, logout_user, login_required, UserMixin
 from secret import secret_key
+from db_manager import User
 
 app = Flask(__name__)
 app.config['SECRET_KEY'] = secret_key
 
 login_manager = LoginManager(app)
 login_manager.login_view = 'login'
-
-
-# Classe User (programmazione oggetti) per Flask-Login
-class User(UserMixin):
-    def __init__(self, user_id, username, email):
-        super().__init__()
-        self.id = user_id  # ID univoco
-        self.username = username  # Attributi
-        self.email = email  # Attributi
-
 
 # Inizializzazione Firestore client
 db = firestore.Client.from_service_account_json('credentials.json', database='boxeproject')
@@ -40,10 +31,12 @@ def load_user(user_id):
         print(f"Error loading user: {e}")
         return None
 
+
 @app.route('/')
 @login_required  # Manda direttamente al login se non autenticato
 def main():
     return redirect('/templates/dashboard.html')
+
 
 @app.route('/register', methods=['GET', 'POST'])
 def register():
@@ -114,7 +107,8 @@ def login():
                     # L'ID del documento è username, quindi uso username come ID
                     user = User(username, username, user_data.get('email'))
                     login_user(user)
-                    next_page = request.values.get('next','/dashboard')  # Prendo il parametro 'next' dalla richiesta, se non esiste uso '/dashboard')
+                    next_page = request.values.get('next',
+                                                   '/dashboard')  # Prendo il parametro 'next' dalla richiesta, se non esiste uso '/dashboard')
                     return redirect(next_page)
                 else:
                     flash('Username o password non validi.')
@@ -127,18 +121,21 @@ def login():
 
     return render_template('login.html')
 
+
 @app.route('/logout')
-@login_required #per fare il logout l'utente deve essere autenticato
+@login_required  # per fare il logout l'utente deve essere autenticato
 def logout():
     logout_user()
     flash('Hai effettuato il logout con successo.')
     return redirect(url_for('login'))
+
 
 @app.route('/dashboard')
 @login_required
 def dashboard():
     user_id = current_user.id
 
+    # Prendi tutte le training_sessions dell'utente
     sessions_ref = db.collection('training_sessions')
     sessions_query = sessions_ref.where('user_id', '==', user_id)
     session_list = list(sessions_query.stream())
@@ -151,14 +148,13 @@ def dashboard():
 
     for sess in session_list:
         session_data = sess.to_dict()
-        punches = session_data.get('punches', [])
+        punch_count = session_data.get('punch_count', 0)
 
         # SKIPPA sessioni senza pugni
-        if len(punches) == 0:
+        if punch_count == 0:
             continue
 
         valid_sessions.append(sess)
-        punch_count = len(punches)
         total_punches += punch_count
 
         if session_data.get('avg_intensity', 0) > 0:
@@ -179,12 +175,13 @@ def dashboard():
                            punch_count=total_punches,
                            avg_intensity=avg_intensity)
 
+
 @app.route('/stats')
 @login_required
 def stats():
     user_id = current_user.id
 
-    # Prendi la user training sessions
+    # Prendi le training sessions dell'utente
     sessions_ref = db.collection('training_sessions')
     sessions_query = sessions_ref.where('user_id', '==', user_id)
     sessions = list(sessions_query.stream())
@@ -192,14 +189,12 @@ def stats():
     sessions_data = []
     for sess in sessions:
         session_data = sess.to_dict()
-        punches = session_data.get('punches', [])
 
-        # Come sopra controllo l'esistenza di date, duration e agv_intensity altrimenti metto dei valori nulli
         sessions_data.append({
             'id': sess.id,
             'date': session_data.get('date', ''),
             'duration': session_data.get('duration', 0),
-            'punch_count': len(punches),
+            'punch_count': session_data.get('punch_count', 0),
             'avg_intensity': session_data.get('avg_intensity', 0)
         })
 
@@ -216,12 +211,13 @@ def start_session():
     now = datetime.now()
     date_str = now.strftime("%Y-%m-%d %H:%M:%S")
 
-    #crea la sessione solo nelle variabili di sessione Flask
+    # crea la sessione solo nelle variabili di sessione Flask
     session['training_user_id'] = user_id
     session['training_start_time'] = date_str
-    session['training_session_created'] = False  #flag per indicare che non è ancora nel DB
+    session['training_session_created'] = False  # flag per indicare che non è ancora nel DB
 
     return redirect(url_for('active_training'))
+
 
 @app.route('/active_training')
 @login_required
@@ -232,6 +228,7 @@ def active_training():
 
     return render_template('active_training.html',
                            username=current_user.username)
+
 
 @app.route('/create_actual_session', methods=['POST'])
 @login_required
@@ -252,7 +249,7 @@ def create_actual_session():
         'date': date_str,
         'avg_intensity': 0,
         'duration': 0,
-        'punches': []
+        'punch_count': 0
     }
 
     try:
@@ -301,7 +298,16 @@ def end_session():
             session_data = session_doc.to_dict()
 
             # Cancella la sessione se non ci sono pugni registrati
-            if len(session_data.get('punches', [])) == 0:
+            if session_data.get('punch_count', 0) == 0:
+                # Cancella anche tutti i documenti delle accelerazioni associate
+                accelerations_ref = db.collection('accelerations')
+                accelerations_query = accelerations_ref.where('training_session_id', '==', session_id)
+                accelerations_docs = list(accelerations_query.stream())
+
+                for acc_doc in accelerations_docs:
+                    acc_doc.reference.delete()
+
+                # Cancella la sessione
                 session_ref.delete()
 
                 # Rimuovi le info della sessione
@@ -356,19 +362,19 @@ def upload_data_buffer():
     try:
         data = json.loads(request.values['data'])
         session_id = session['training_session_id']
+        user_id = current_user.id
 
         # Prendi i dati della sessione
         session_ref = db.collection('training_sessions').document(session_id)
         session_data = session_ref.get().to_dict()
 
         # Current data
-        punches = session_data.get('punches', [])
-        current_punch_count = len(punches)
+        current_punch_count = session_data.get('punch_count', 0)
         current_total_intensity = session_data.get('avg_intensity',
                                                    0) * current_punch_count if current_punch_count > 0 else 0
 
         # Processa i nuovi pugni
-        new_punches = []
+        new_accelerations = []
         total_new_intensity = 0
 
         for point in data:
@@ -377,31 +383,37 @@ def upload_data_buffer():
             y = point.get('y', 0)
             z = point.get('z', 0)
 
-            # Calcolare l'intensità dei pugni
-            intensity = (x ** 2 + y ** 2 + z ** 2) ** 0.5
-            total_new_intensity += intensity
-
-            new_punch = {
+            new_acceleration = {
+                'training_session_id': session_id,
                 'timestamp': now,
                 'acceleration_x': x,
                 'acceleration_y': y,
                 'acceleration_z': z,
-                'intensity': intensity
             }
-            new_punches.append(new_punch)
+            new_accelerations.append(new_acceleration)
 
-        # Caricare le statistiche dei pugni
-        new_punch_count = len(new_punches)
+        # Salva le accelerazioni nella collection separata
+        accelerations_ref = db.collection('accelerations')
+        batch = db.batch()
+
+        for acceleration in new_accelerations:
+            doc_ref = accelerations_ref.document()
+            batch.set(doc_ref, acceleration)
+
+        batch.commit()
+
+        # Aggiorna le statistiche della sessione
+        new_punch_count = len(new_accelerations)
         total_punches = current_punch_count + new_punch_count
 
         # Calcolare la nuova intensità media
         total_intensity = current_total_intensity + total_new_intensity
         avg_intensity = round(total_intensity / total_punches, 2) if total_punches > 0 else 0
 
-        # Caricare la sessione
+        # Aggiorna la sessione
         session_ref.update({
             'avg_intensity': avg_intensity,
-            'punches': firestore.ArrayUnion(new_punches)
+            'punch_count': total_punches
         })
 
         return 'Data saved successfully', 200
@@ -409,12 +421,13 @@ def upload_data_buffer():
         print(f"Error saving data: {e}")
         return f'Error saving data: {str(e)}', 500
 
+
 @app.route('/training')
 @login_required
 def training():
     user_id = current_user.id
 
-    # Prendi la user's training session
+    # Prendi le training sessions dell'utente
     sessions_ref = db.collection('training_sessions')
     sessions_query = sessions_ref.where('user_id', '==', user_id)
     sessions = list(sessions_query.stream())
@@ -422,17 +435,17 @@ def training():
     sessions_data = []
     for sess in sessions:
         session_data = sess.to_dict()
-        punches = session_data.get('punches', [])
+        punch_count = session_data.get('punch_count', 0)
 
         # Salta le sessioni senza pugni
-        if len(punches) == 0:
+        if punch_count == 0:
             continue
 
         sessions_data.append({
             'id': sess.id,
             'date': session_data.get('date', ''),
             'duration': session_data.get('duration', 0),
-            'punch_count': len(punches),
+            'punch_count': punch_count,
             'avg_intensity': session_data.get('avg_intensity', 0)
         })
 
@@ -442,6 +455,7 @@ def training():
     return render_template('training.html',
                            username=current_user.username,
                            sessions=sessions_data)
+
 
 if __name__ == '__main__':
     app.run(host='0.0.0.0', port=222, debug=True, ssl_context='adhoc')
