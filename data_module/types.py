@@ -66,6 +66,7 @@ class AnnotatedAction:
     label: Label
     timestamp: str
 
+    @classmethod
     def from_raw_annotated_action(cls, action: RawAnnotatedAction) -> 'AnnotatedAction':
         """Convert a RawAnnotatedAction to an AnnotatedAction."""
         data = np.array([[measure.x, measure.y, measure.z] for measure in action.impulses])
@@ -83,24 +84,29 @@ class AnnotatedFeatures:
     partition: str | None = None
 @dataclass
 class AnnotatedFeaturesCollection:
-    features: list[AnnotatedFeatures]
+    data: list[AnnotatedFeatures]
 
     @property
     def features(self) -> list[np.ndarray]:
         """Returns the features as a DataFrame."""
-        return [feat.features for feat in self.features]
-    
+        return [feat.features for feat in self.data]
+
     @property
-    def labels(self) -> list[Label]:
+    def labels_as_int(self) -> list[Label | int]:
         """Returns the labels as a list."""
-        return [feat.label for feat in self.features]
+        return [feat.label.value for feat in self.data]
+
+    @property
+    def labels_as_str(self) -> list[Label]:
+        """Returns the labels as a list."""
+        return [feat.label.name for feat in self.data]
 
     @property
     def timestamps(self) -> list[str]:
         """Returns the timestamps as a list."""
-        return [feat.timestamp for feat in self.features]
+        return [feat.timestamp for feat in self.data]
 
     @property
     def partitions(self) -> list[str | None]:
         """Returns the partitions as a list."""
-        return [feat.partition for feat in self.features]
+        return [feat.partition for feat in self.data]

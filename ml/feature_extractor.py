@@ -7,7 +7,7 @@ from sklearn.manifold import TSNE
 from data_module.types import AnnotatedAction, AnnotatedFeatures, AnnotatedFeaturesCollection
 
 class StatisticalFeatureExtractor:
-    def __call__(self, data: list[AnnotatedAction]) -> dict[str, Any]:
+    def __call__(self, data: list[AnnotatedAction]) -> AnnotatedFeaturesCollection:
         return self.extract_features(data)
 
     def extract_features(self, data: list[AnnotatedAction]) -> AnnotatedFeaturesCollection:
@@ -21,16 +21,20 @@ class StatisticalFeatureExtractor:
                 label=action.label,
                 timestamp=action.timestamp
             ))
-        return AnnotatedFeaturesCollection(features=annotated_features)
+        return AnnotatedFeaturesCollection(data=annotated_features)
 
     def extract_features_from_action(self, action: AnnotatedAction) -> np.ndarray:
         """Estrae features da un'azione annotata.
         action.data is a 2D numpy array, we must compute the values for each dimension """
         data = action.data
         assert len(data) > 0, "Data must not be empty"
-
+        self.get_feature_dict(data[-1])
         features_3d = self.get_feature_dict(data)
-        return pd.DataFrame(features_3d).to_numpy().flatten()
+        flattened_features = []
+        for key, value in features_3d.items():
+            flattened_features.append(value.flatten())
+
+        return np.concatenate(flattened_features)
 
     def get_feature_dict(self, data: np.ndarray) -> dict[str, float]:
         features = {}
@@ -50,14 +54,24 @@ class StatisticalFeatureExtractor:
         features['iqr'] = features['q75'] - features['q25']
 
         ## Signal shape features
-        features['skewness'] = stats.skew(data, axis=0)
-        features['kurtosis'] = stats.kurtosis(data, axis=0)
+        try:
+            features['skewness'] = stats.skew(data, nan_policy='raise', axis=0)
+            features['kurtosis'] = stats.kurtosis(data, nan_policy='raise', axis=0)
+        except Exception as e:
+            print(f"Error computing signal shape features: {e}")
+            features['skewness'] = np.zeros(data.shape[1])
+            features['kurtosis'] = np.zeros(data.shape[1])
 
         ## Derivatives
         derivatives = np.diff(data, axis=0)
-        features['mean_derivative'] = np.mean(derivatives, axis=0)
-        features['max_derivative'] = np.max(np.abs(derivatives), axis=0)
-        features['std_derivative'] = np.std(derivatives, axis=0)
+        if derivatives.shape[0] > 0:
+            features['mean_derivative'] = np.mean(derivatives, axis=0)
+            features['max_derivative'] = np.max(np.abs(derivatives), axis=0)
+            features['std_derivative'] = np.std(derivatives, axis=0)
+        else:
+            features['mean_derivative'] = np.zeros(data.shape[1])
+            features['max_derivative'] = np.zeros(data.shape[1])
+            features['std_derivative'] = np.zeros(data.shape[1])
 
         features['energy'] = np.sum(data ** 2, axis=0)
         features['rms'] = np.sqrt(np.mean(data ** 2, axis=0))
@@ -75,9 +89,9 @@ class StatisticalFeatureExtractor:
 
         peak_idx = np.argmax(data, axis=0)
         features['peak_position'] = peak_idx / len(data)  # Relative
-        features['peak_value'] = data[peak_idx]
+        # features['peak_value'] = data[peak_idx]
 
-        features['peak_to_mean_ratio'] = features['max'] / features['mean']
+        features['peak_to_mean_ratio'] = features['max'] / (features['mean'] + 1e-8)
         threshold = features['mean'] + features['std']
         peaks = np.sum(data > threshold, axis=0)
         features['peak_count'] = peaks
@@ -85,15 +99,21 @@ class StatisticalFeatureExtractor:
         above_threshold = (data > threshold) / len(data)
         features['above_threshold_count'] = np.sum(above_threshold, axis=0)
 
+        for key in features.keys():
+            # Check for NaNs
+            if np.any(np.isnan(features[key])):
+                print(f"NaNs found in feature '{key}': {features[key]}")
+                features[key] = np.nan_to_num(features[key], nan=0.0)
+
         return features
-    
+
 def compute_tsne(
     feature_collection: AnnotatedFeaturesCollection,
     do_pca: bool = True,
 ) -> np.ndarray:
     """Compute t-SNE for the given features.
     Returns an ndarray component-1, component-2"""
-    tnse = TSNE(n_components=2, random_state=42)
+    tnse = TSNE(n_components=2, random_state=42, verbose=1, perplexity=10)
     if do_pca:
         pca = PCA(n_components=10)
         reduced_features = pca.fit_transform(feature_collection.features)
