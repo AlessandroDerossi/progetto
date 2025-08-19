@@ -37,7 +37,7 @@ class PunchDataset:
         return self.test_data
 
     @classmethod
-    def load_samples_from_path(cls, path: Path) -> 'PunchDataset':
+    def load_samples_from_path(cls, path: Path, split: tuple[float, float]=(0.8, 0.2)) -> 'PunchDataset':
         samples = []
         files = glob.glob(str(path / "*.json"))
         for file_path in tqdm(files, desc="Loading JSON files", total=len(files)):
@@ -46,7 +46,7 @@ class PunchDataset:
                 data = json.load(f)
                 action = RawAnnotatedAction.from_json(data)
                 samples.append(action)
-        return cls(samples)
+        return cls(samples, split=split)
 
     @property
     def processed_samples(self) -> list[AnnotatedAction]:
@@ -85,4 +85,4 @@ if __name__ == "__main__":
     logger = getLogger(__name__)
     configure_logger(__name__)
     logger.debug("Debug dataset.py")
-    dataset = PunchDataset.load_samples_from_path(Path("training_data"))
+    dataset = PunchDataset.load_samples_from_path(Path("training_data"), split=(0.8, 0.2))
