@@ -1,3 +1,5 @@
+'''carica i dati (punches e non punches) dalle cartelle locali a Firestore'''
+
 import os
 import json
 import firebase_admin
