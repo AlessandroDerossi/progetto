@@ -39,8 +39,8 @@ class DataCollector:
             return {'punch': 0, 'non_punch': 0, 'total': 0}
 
         files = [f for f in os.listdir(self.base_folder) if f.endswith('.json')]
-        punch_count = len([f for f in files if f.startswith('punch_')])
-        non_punch_count = len([f for f in files if f.startswith('non_punch_')])
+        punch_count = len([f for f in files if f.startswith('tanti_pugni_')])
+        non_punch_count = len([f for f in files if f.startswith('tanti_non_pugni_')])
 
         return {
             'punch': punch_count,
