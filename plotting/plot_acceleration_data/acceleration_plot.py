@@ -3,9 +3,6 @@ import json
 import numpy as np
 import matplotlib.pyplot as plt
 
-os.chdir(os.path.dirname(__file__)) 
-DATA_DIR = "data_files"
-
 def load_json_files(folder):
     files = [f for f in os.listdir(folder) if f.endswith(".json")]
     return [os.path.join(folder, f) for f in files]
@@ -50,6 +47,7 @@ def plot_accelerations(files, y_range=None):
         plt.show()
 
 if __name__ == "__main__":
-    files = load_json_files(DATA_DIR)
+    os.chdir(os.path.dirname(__file__)) # Change to the directory of this script
+    files = load_json_files("data_files")
     y_min, y_max = get_global_intensity_range(files)
     plot_accelerations(files, y_range=(y_min, y_max))
