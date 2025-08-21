@@ -1,1 +1,1 @@
-data_root: training_data
+data_root: data/filtered_training_data

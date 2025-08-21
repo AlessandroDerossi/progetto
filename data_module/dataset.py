@@ -44,7 +44,7 @@ class PunchDataset:
             with open(file_path, 'r') as f:
                 # Parse the JSON file into RawAnnotatedAction objects
                 data = json.load(f)
-                action = RawAnnotatedAction.from_json(data)
+                action = RawAnnotatedAction.from_json(data, file_path)
                 samples.append(action)
         return cls(samples, split=split)
 

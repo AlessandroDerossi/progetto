@@ -1,5 +1,6 @@
-from dataclasses import dataclass
+from dataclasses import asdict, dataclass
 import enum
+from typing import ClassVar
 
 import numpy as np
 
@@ -12,6 +13,9 @@ class Label(enum.Enum):
             return "punch"
         return "non_punch"
 
+    def to_json(self):
+        return str(self)
+    
     @classmethod
     def from_json_label(cls, label: str) -> "Label":
         if label == "punch":
@@ -37,6 +41,13 @@ class RawImpulseMeasure:
     y: float
     z: float
 
+    @property
+    def intensity(self):
+        return (self.x**2 + self.y**2 + self.z**2) ** 0.5
+
+    def to_dict(self):
+        return asdict(self)
+
 @dataclass
 class RawAnnotatedAction:
     """
@@ -50,13 +61,29 @@ class RawAnnotatedAction:
     impulses: list[RawImpulseMeasure]
     label: Label
     timestamp: str # This timestamp does not match the timestamps in the RawImpulseMeasure
+    file_path: str
+    _max_impulse: ClassVar[int] = -1
 
     @classmethod
-    def from_json(cls, data: dict) -> 'RawAnnotatedAction':
+    def from_json(cls, data: dict, file_path: str) -> 'RawAnnotatedAction':
         impulses = [RawImpulseMeasure(**impulse) for impulse in data.get("data", [])]
         label = Label.from_json_label(data.get("label", "NOT_PUNCH"))
         timestamp = data.get("timestamp", "")
-        return cls(impulses=impulses, label=label, timestamp=timestamp)
+        return cls(impulses=impulses, label=label, timestamp=timestamp, file_path=file_path)
+
+    def to_dict(self):
+        dict = asdict(self)
+        dict["data"] = dict["impulses"]
+        del dict["impulses"]
+        dict["label"] = str(dict["label"])
+
+        return dict
+
+    @property
+    def max_impulse(self):
+        if self._max_impulse == -1:
+            self._max_impulse = max(self.impulses, key=lambda x: x.intensity).intensity
+        return self._max_impulse
 
 @dataclass
 class AnnotatedAction:
