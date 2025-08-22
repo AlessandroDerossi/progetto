@@ -47,6 +47,6 @@ def plot_accelerations(files, y_range=None):
         plt.show()
 
 if __name__ == "__main__":
-    files = load_json_files("data/training_data")
+    files = load_json_files("data/dati_prova")
     y_min, y_max = get_global_intensity_range(files)
     plot_accelerations(files, y_range=(y_min, y_max))

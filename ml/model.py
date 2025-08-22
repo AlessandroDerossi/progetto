@@ -37,7 +37,7 @@ class PunchClassifier():
         Args:
             data: the input data to predict on, 2d vector of shape (n_samples, n_features)
         """
-        X = self._from_data_to_feature_collection(data)
+        X = self._from_data_to_feature_collection(data).features  # <- aggiungi .features
         return self.model.predict(X)
 
     def predict_proba(self, data: list[AnnotatedAction] | list[AnnotatedFeatures]) -> np.ndarray:

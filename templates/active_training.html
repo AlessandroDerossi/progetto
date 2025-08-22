@@ -230,6 +230,8 @@
     // Accelerometer variables
     let sensor = null;
     let dataBuffer = [];
+    let highIntensityBuffer = []; // Buffer per la finestra sopra threshold
+    const HIGH_INTENSITY_THRESHOLD = 25;
     let bufferTimer = null;
     let lastPunchTime = 0;
     let punchThreshold = 15; // Initial threshold for punch detection
@@ -325,6 +327,22 @@
 
             // Calculate magnitude of acceleration vector
             const magnitude = Math.sqrt(x*x + y*y + z*z);
+
+            if (magnitude > HIGH_INTENSITY_THRESHOLD) {
+            // Aggiungi dati al buffer della finestra
+            highIntensityBuffer.push({
+                timestamp: Date.now(),
+                x: x,
+                y: y,
+                z: z
+            });
+            } else {
+            // Se la magnitudine scende sotto la soglia, salva il buffer se non è vuoto
+            if (highIntensityBuffer.length > 0) {
+                saveHighIntensityWindow(highIntensityBuffer);
+                highIntensityBuffer = []; // Reset buffer
+            }
+            }
 
             // Solo i dati significativi vanno nel buffer (sopra una soglia minima)
             if (magnitude > baselineAcceleration/2) {
@@ -464,6 +482,34 @@
         timerDisplay.textContent =
             `${hours.toString().padStart(2, '0')}:${minutes.toString().padStart(2, '0')}:${secs.toString().padStart(2, '0')}`;
     }
+
+    function saveHighIntensityWindow(buffer) {
+    const now = new Date();
+    const timestampStr = now.toISOString().replace(/[-:T.]/g, '').slice(0, 17); // es. 20250808_174100_595
+    const filePath = `data\\training_data\\non_punch_${timestampStr}.json`;
+
+    const jsonData = {
+        label: "non_punch",
+        timestamp: timestampStr,
+        file_path: filePath,
+        data: buffer
+    };
+
+    // Invia i dati al server Flask
+    fetch('/save_high_intensity', {
+        method: 'POST',
+        headers: {
+            'Content-Type': 'application/json'
+        },
+        body: JSON.stringify(jsonData)
+    })
+    .then(response => response.json())
+    .then(data => {
+        console.log('High intensity window saved:', data.status);
+    })
+    .catch(error => console.error('Error sending high intensity window:', error));
+    }
+
 
     // Event listeners for buttons
     startButton.addEventListener('click', function() {

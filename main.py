@@ -1,9 +1,13 @@
-from flask import Flask, render_template, request, redirect, url_for, flash, session
+from flask import Flask, render_template, request, redirect, url_for, flash, session, jsonify
 from datetime import datetime
 import json
+import joblib
 from flask_login import LoginManager, current_user, login_user, logout_user, login_required
+from data_module.types import AnnotatedAction, RawAnnotatedAction
+from ml.model import PunchClassifier
 from secret import secret_key
 from db_manager import DBManager
+import os
 
 app = Flask(__name__)
 app.config['SECRET_KEY'] = secret_key
@@ -276,6 +280,63 @@ def training():
     return render_template('training.html',
                            username=current_user.username,
                            sessions=sessions_data)
+'''
+CODICE PER SALVARE I DATI NELLA CARTELLA DATI_PROVA
+
+@app.route('/save_high_intensity', methods=['POST'])
+def save_high_intensity():
+    try:
+        data = request.get_json()
+        print("Ricevuto dal client:", data)
+
+        if data is None:
+            return jsonify({"status": "error", "message": "Nessun JSON ricevuto"}), 400
+
+        # Cartella relativa alla posizione del file main.py
+        save_dir = "data/dati_prova"
+        os.makedirs(save_dir, exist_ok=True)
+
+        file_path = os.path.join(save_dir, f"data_{data['timestamp']}.json")
+        
+        with open(file_path, 'w') as f:
+            json.dump(data, f, indent=2)
+
+        print("File salvato correttamente in:", file_path)
+        return jsonify({"status": "saved", "file_path": file_path})
+
+    except Exception as e:
+        import traceback
+        traceback.print_exc()
+        return jsonify({"status": "error", "message": str(e)}), 500
+'''
+model = PunchClassifier()
+model.model = joblib.load("trained_model.pkl")  # path relativo al file salvato
+print("Modello caricato, pronto per predizioni.")
+count_punnches = 0
+@app.route('/save_high_intensity', methods=['POST'])
+def save_high_intensity():
+    try:
+        data = request.get_json()
+        if data is None:
+            return jsonify({"status": "error", "message": "Nessun JSON ricevuto"}), 400
+
+        raw_action = RawAnnotatedAction.from_json(data, file_path="")
+        annotated_action = AnnotatedAction.from_raw_annotated_action(raw_action)
+
+        prediction = model.predict([annotated_action])[0]  # 0 o 1
+        label_str = "non_punch" if prediction == 0 else "punch"
+        if label_str == "punch":
+            global count_punnches
+            count_punnches += 1
+            print(f"Numero totale di pugni rilevati: {count_punnches}")
+        print(f"Predicted label: {label_str} for timestamp {data['timestamp']}")
+
+        return jsonify({"status": "predicted", "label": label_str, "timestamp": data['timestamp']})
+
+    except Exception as e:
+        import traceback
+        traceback.print_exc()
+        return jsonify({"status": "error", "message": str(e)}), 500
 
 
 if __name__ == '__main__':

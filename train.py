@@ -38,6 +38,10 @@ def run(config):
     logger.info("Plotting t-SNE visualization")
     get_plot_tsne(annotated_features, show=True)
     logger.info("Training completed.")
+    import joblib
+    save_path = Path("trained_model.pkl")
+    joblib.dump(model.model, save_path)
+    logger.info(f"Modello salvato in {save_path}")
 
 if __name__ == "__main__":
     configure_logger(__name__)
