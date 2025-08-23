@@ -173,7 +173,7 @@
             <div class="col-md-6">
                 <div class="card">
                     <div class="card-body">
-                        <h5 class="card-title">Pugni Rilevati</h5>
+                        <h5 class="card-title">Pugni Rilevati (AI)</h5>
                         <p class="display-4 text-center" id="punchCounter">0</p>
                         <div class="punch-animation" id="punchAnimation"></div>
                     </div>
@@ -233,13 +233,9 @@
     let highIntensityBuffer = []; // Buffer per la finestra sopra threshold
     const HIGH_INTENSITY_THRESHOLD = 25;
     let bufferTimer = null;
-    let lastPunchTime = 0;
-    let punchThreshold = 15; // Initial threshold for punch detection
     let baselineAcceleration = 10; // Valore base per calibrare il rilevamento
     let calibrationSamples = []; // Per calibrare l'accelerometro
     let isCalibrating = false;
-    let minMagnitudeBetweenPunches = 5; // Minima intensità tra pugni per distinguerli
-    let isMagBelowMinRequired = false; // Flag per verificare che l'intensità sia scesa tra i pugni
 
     // Messaggi in italiano per lo stato dell'accelerometro
     const MESSAGES = {
@@ -249,12 +245,12 @@
         READY: "Accelerometro pronto. Premi 'Inizia' per cominciare l'allenamento.",
         CALIBRATING: "Calibrazione in corso... Tieni fermo il dispositivo per un momento.",
         CALIBRATION_COMPLETE: "Calibrazione completata. Accelerometro pronto all'uso.",
-        RUNNING: "Accelerometro attivo. Allenamento in corso...",
+        RUNNING: "Accelerometro attivo. Allenamento in corso... (Solo AI rileva pugni)",
         PAUSED: "Allenamento in pausa. Premi 'Riprendi' per continuare.",
-        PUNCH_DETECTED: "Pugno rilevato! Intensità: ",
+        PUNCH_DETECTED: "Pugno AI rilevato! Totale: ",
         ERROR: "Errore del sensore: ",
         DATA_SENT: "Dati inviati al server: ",
-        NO_PUNCHES: "Nessun pugno rilevato. L'allenamento non verrà salvato."
+        NO_PUNCHES: "Nessun pugno rilevato dall'AI. L'allenamento non verrà salvato."
     };
 
     // Check if accelerometer is available
@@ -290,15 +286,11 @@
                 }
                 baselineAcceleration = sum / calibrationSamples.length;
 
-                // Set punch threshold above baseline
-                punchThreshold = baselineAcceleration + 12;
-
                 isCalibrating = false;
-                debugInfo.textContent = MESSAGES.CALIBRATION_COMPLETE +
-                    ` (Soglia pugni: ${punchThreshold.toFixed(2)})`;
+                debugInfo.textContent = MESSAGES.CALIBRATION_COMPLETE;
             } else {
                 debugInfo.textContent = "Calibrazione fallita. Usando valori di default.";
-                punchThreshold = 15;
+                baselineAcceleration = 10;
             }
         }, 2000);
     }
@@ -329,22 +321,22 @@
             const magnitude = Math.sqrt(x*x + y*y + z*z);
 
             if (magnitude > HIGH_INTENSITY_THRESHOLD) {
-            // Aggiungi dati al buffer della finestra
-            highIntensityBuffer.push({
-                timestamp: Date.now(),
-                x: x,
-                y: y,
-                z: z
-            });
+                // Aggiungi dati al buffer della finestra ad alta intensità
+                highIntensityBuffer.push({
+                    timestamp: Date.now(),
+                    x: x,
+                    y: y,
+                    z: z
+                });
             } else {
-            // Se la magnitudine scende sotto la soglia, salva il buffer se non è vuoto
-            if (highIntensityBuffer.length > 0) {
-                saveHighIntensityWindow(highIntensityBuffer);
-                highIntensityBuffer = []; // Reset buffer
-            }
+                // Se la magnitudine scende sotto la soglia, salva il buffer se non è vuoto
+                if (highIntensityBuffer.length > 0) {
+                    saveHighIntensityWindow(highIntensityBuffer);
+                    highIntensityBuffer = []; // Reset buffer
+                }
             }
 
-            // Solo i dati significativi vanno nel buffer (sopra una soglia minima)
+            // Solo i dati significativi vanno nel buffer normale (sopra una soglia minima)
             if (magnitude > baselineAcceleration/2) {
                 // Add to buffer
                 dataBuffer.push({
@@ -354,16 +346,6 @@
                     magnitude: magnitude,
                     timestamp: Date.now()
                 });
-            }
-
-            // Check if magnitude dropped below minimum to reset punch detection
-            if (magnitude < minMagnitudeBetweenPunches) {
-                isMagBelowMinRequired = true;
-            }
-
-            // Smart punch detection
-            if (isRunning) {
-                detectPunch(x, y, z, magnitude);
             }
         };
 
@@ -380,7 +362,7 @@
             // Calibrate after startup
             calibrateAccelerometer();
 
-            // Set up buffer upload - frequency ridotta a ogni 5 secondi
+            // Set up buffer upload - frequency ridotta a ogni 2 secondi
             bufferTimer = setInterval(uploadDataBuffer, 2000);
 
             return true;
@@ -388,40 +370,6 @@
             debugInfo.textContent = MESSAGES.INIT_ERROR + error;
             console.error("Couldn't start the sensor", error);
             return false;
-        }
-    }
-
-    // Improved punch detection algorithm
-    function detectPunch(x, y, z, magnitude) {
-        const now = Date.now();
-
-        // Prevent double counting and ensure there was a "quiet" period between punches
-        if (now - lastPunchTime < 500 || !isMagBelowMinRequired) {
-            return;
-        }
-
-        // Better punch detection with dynamic threshold
-        if (magnitude > punchThreshold) {
-            // Record this punch
-            lastPunchTime = now;
-            punches++;
-            hasPunches = true;
-            isMagBelowMinRequired = false; // Reset to prevent detecting multiple punches in sequence
-
-            // Update intensity calculation (use actual magnitude not just threshold)
-            const punchIntensity = magnitude;
-            totalIntensity += punchIntensity;
-            const currentAvgIntensity = (totalIntensity / punches).toFixed(2);
-
-            // Update UI
-            punchCounter.textContent = punches;
-            avgIntensity.textContent = currentAvgIntensity;
-
-            // Show punch animation
-            showPunchAnimation();
-
-            // Debug info
-            debugInfo.textContent = MESSAGES.PUNCH_DETECTED + `${magnitude.toFixed(2)}`;
         }
     }
 
@@ -483,73 +431,101 @@
             `${hours.toString().padStart(2, '0')}:${minutes.toString().padStart(2, '0')}:${secs.toString().padStart(2, '0')}`;
     }
 
+    // FUNZIONE MODIFICATA: Salva finestra ad alta intensità e gestisce risposta del modello ML
     function saveHighIntensityWindow(buffer) {
-    const now = new Date();
-    const timestampStr = now.toISOString().replace(/[-:T.]/g, '').slice(0, 17); // es. 20250808_174100_595
-    const filePath = `data\\training_data\\non_punch_${timestampStr}.json`;
+        const now = new Date();
+        const timestampStr = now.toISOString().replace(/[-:T.]/g, '').slice(0, 17);
+        const filePath = `data\\training_data\\non_punch_${timestampStr}.json`;
 
-    const jsonData = {
-        label: "non_punch",
-        timestamp: timestampStr,
-        file_path: filePath,
-        data: buffer
-    };
+        const jsonData = {
+            label: "non_punch",
+            timestamp: timestampStr,
+            file_path: filePath,
+            data: buffer
+        };
 
-    // Invia i dati al server Flask
-    fetch('/save_high_intensity', {
-        method: 'POST',
-        headers: {
-            'Content-Type': 'application/json'
-        },
-        body: JSON.stringify(jsonData)
-    })
-    .then(response => response.json())
-    .then(data => {
-        console.log('High intensity window saved:', data.status);
-    })
-    .catch(error => console.error('Error sending high intensity window:', error));
-    }
-
-
-    // Event listeners for buttons
-    startButton.addEventListener('click', function() {
-    if (!isRunning) {
-        // Prima crea la sessione nel database
-        fetch('/create_actual_session', {
+        // Invia i dati al server Flask per l'analisi del modello ML
+        fetch('/save_high_intensity', {
             method: 'POST',
             headers: {
-                'Content-Type': 'application/json',
-            }
+                'Content-Type': 'application/json'
+            },
+            body: JSON.stringify(jsonData)
         })
         .then(response => response.json())
         .then(data => {
-            if (data.status === 'success') {
-                // Solo se la sessione è stata creata con successo, inizia l'allenamento
-                if (initAccelerometer()) {
-                    isRunning = true;
-                    timer = setInterval(updateTimer, 1000);
+            console.log('High intensity window processed:', data.status);
 
-                    startButton.style.display = 'none';
-                    resumeButton.style.display = 'none';
-                    pauseButton.disabled = false;
-                    stopButton.disabled = false;
+            // NUOVA LOGICA: Se il modello ML ha rilevato un pugno, aggiorna il contatore UI
+            if (data.status === 'predicted' && data.label === 'punch') {
+                // Aggiorna il contatore dei pugni nell'interfaccia
+                punches++;
+                hasPunches = true;
 
-                    debugInfo.textContent = "Allenamento iniziato! Sessione creata nel database.";
-                } else {
-                    alert(MESSAGES.INIT_ERROR);
-                }
+                // Calcola intensità media (usando una stima dall'intensità del buffer)
+                const avgBufferIntensity = buffer.reduce((sum, point) => {
+                    const magnitude = Math.sqrt(point.x*point.x + point.y*point.y + point.z*point.z);
+                    return sum + magnitude;
+                }, 0) / buffer.length;
+
+                totalIntensity += avgBufferIntensity;
+                const currentAvgIntensity = (totalIntensity / punches).toFixed(2);
+
+                // Aggiorna UI
+                punchCounter.textContent = punches;
+                avgIntensity.textContent = currentAvgIntensity;
+
+                // Mostra animazione pugno
+                showPunchAnimation();
+
+                debugInfo.textContent = MESSAGES.PUNCH_DETECTED + punches;
             } else {
-                alert('Errore nella creazione della sessione: ' + data.message);
-                debugInfo.textContent = 'Errore nella creazione della sessione: ' + data.message;
+                // Movimento non classificato come pugno
+                console.log('Movimento non classificato come pugno');
             }
         })
-        .catch(error => {
-            console.error('Error creating session:', error);
-            alert('Errore di connessione nella creazione della sessione');
-            debugInfo.textContent = 'Errore di connessione nella creazione della sessione';
-        });
+        .catch(error => console.error('Error sending high intensity window:', error));
     }
-});
+
+    // Event listeners for buttons
+    startButton.addEventListener('click', function() {
+        if (!isRunning) {
+            // Prima crea la sessione nel database
+            fetch('/create_actual_session', {
+                method: 'POST',
+                headers: {
+                    'Content-Type': 'application/json',
+                }
+            })
+            .then(response => response.json())
+            .then(data => {
+                if (data.status === 'success') {
+                    // Solo se la sessione è stata creata con successo, inizia l'allenamento
+                    if (initAccelerometer()) {
+                        isRunning = true;
+                        timer = setInterval(updateTimer, 1000);
+
+                        startButton.style.display = 'none';
+                        resumeButton.style.display = 'none';
+                        pauseButton.disabled = false;
+                        stopButton.disabled = false;
+
+                        debugInfo.textContent = "Allenamento iniziato! Solo l'AI rileva i pugni.";
+                    } else {
+                        alert(MESSAGES.INIT_ERROR);
+                    }
+                } else {
+                    alert('Errore nella creazione della sessione: ' + data.message);
+                    debugInfo.textContent = 'Errore nella creazione della sessione: ' + data.message;
+                }
+            })
+            .catch(error => {
+                console.error('Error creating session:', error);
+                alert('Errore di connessione nella creazione della sessione');
+                debugInfo.textContent = 'Errore di connessione nella creazione della sessione';
+            });
+        }
+    });
 
     resumeButton.addEventListener('click', function() {
         if (!isRunning) {
@@ -604,7 +580,7 @@
         // Upload any remaining data
         uploadDataBuffer();
 
-        // Check if any punches were recorded
+        // Check if any punches were recorded by the ML model
         if (!hasPunches) {
             alert(MESSAGES.NO_PUNCHES);
 

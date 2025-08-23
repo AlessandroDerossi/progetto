@@ -255,9 +255,9 @@ def upload_data_buffer():
         if not db_manager.save_accelerations(new_accelerations):
             return 'Error saving accelerations', 500
 
-        # Aggiorna le statistiche della sessione usando DBManager
-        if not db_manager.update_session_stats(session_id, new_punch_count, total_new_intensity):
-            return 'Error updating session stats', 500
+        # NON aggiornare più le statistiche qui, lo fa solo il modello ML
+        # if not db_manager.update_session_stats(session_id, new_punch_count, total_new_intensity):
+        #     return 'Error updating session stats', 500
 
         return 'Data saved successfully', 200
 
@@ -280,6 +280,8 @@ def training():
     return render_template('training.html',
                            username=current_user.username,
                            sessions=sessions_data)
+
+
 '''
 CODICE PER SALVARE I DATI NELLA CARTELLA DATI_PROVA
 
@@ -297,7 +299,7 @@ def save_high_intensity():
         os.makedirs(save_dir, exist_ok=True)
 
         file_path = os.path.join(save_dir, f"data_{data['timestamp']}.json")
-        
+
         with open(file_path, 'w') as f:
             json.dump(data, f, indent=2)
 
@@ -309,10 +311,13 @@ def save_high_intensity():
         traceback.print_exc()
         return jsonify({"status": "error", "message": str(e)}), 500
 '''
+
 model = PunchClassifier()
 model.model = joblib.load("trained_model.pkl")  # path relativo al file salvato
 print("Modello caricato, pronto per predizioni.")
 count_punnches = 0
+
+
 @app.route('/save_high_intensity', methods=['POST'])
 def save_high_intensity():
     try:
@@ -325,13 +330,38 @@ def save_high_intensity():
 
         prediction = model.predict([annotated_action])[0]  # 0 o 1
         label_str = "non_punch" if prediction == 0 else "punch"
+
         if label_str == "punch":
             global count_punnches
             count_punnches += 1
             print(f"Numero totale di pugni rilevati: {count_punnches}")
+
+            # AGGIORNAMENTO DATABASE: Aggiorna il database con il pugno rilevato dal modello ML
+            if 'training_session_id' in session:
+                session_id = session['training_session_id']
+
+                # Calcola intensità media dal buffer dei dati
+                total_magnitude = 0
+                for point in data['data']:
+                    magnitude = (point['x'] ** 2 + point['y'] ** 2 + point['z'] ** 2) ** 0.5
+                    total_magnitude += magnitude
+
+                avg_intensity = total_magnitude / len(data['data']) if data['data'] else 0
+
+                # Aggiorna le statistiche della sessione nel database
+                # Incrementa di 1 pugno e aggiungi l'intensità
+                if db_manager.update_session_stats(session_id, 1, avg_intensity):
+                    print(f"Database aggiornato: +1 pugno, intensità {avg_intensity:.2f}")
+                else:
+                    print("Errore nell'aggiornamento del database")
+
         print(f"Predicted label: {label_str} for timestamp {data['timestamp']}")
 
-        return jsonify({"status": "predicted", "label": label_str, "timestamp": data['timestamp']})
+        return jsonify({
+            "status": "predicted",
+            "label": label_str,
+            "timestamp": data['timestamp']
+        })
 
     except Exception as e:
         import traceback
