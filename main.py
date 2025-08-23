@@ -18,6 +18,10 @@ login_manager.login_view = 'login'
 # Inizializzazione DBManager
 db_manager = DBManager('credentials.json', 'boxeproject')
 
+model = PunchClassifier()
+model.model = joblib.load("trained_model.pkl")  # path relativo al file salvato
+print("Modello caricato, pronto per predizioni.")
+count_punnches = 0
 
 # Funzione per caricare l'utente (ora usa DBManager)
 @login_manager.user_loader
@@ -167,9 +171,10 @@ def create_actual_session():
     session_id = db_manager.create_training_session(user_id, date_str)
 
     if session_id:
-        # Aggiorna le variabili di sessione
         session['training_session_id'] = session_id
         session['training_session_created'] = True
+        session['ml_punch_count'] = 0
+        session['ml_total_intensity'] = 0.0
         return json.dumps({'status': 'success', 'session_id': session_id}), 200
     else:
         return json.dumps({'status': 'error', 'message': 'Errore nella creazione della sessione'}), 500
@@ -212,6 +217,8 @@ def end_session():
             session.pop('training_user_id', None)
             session.pop('training_start_time', None)
             session.pop('training_session_created', None)
+            session.pop('ml_punch_count', None)
+            session.pop('ml_total_intensity', None)
 
             return json.dumps(
                 {'status': 'deleted', 'message': 'Sessione eliminata perché non conteneva pugni'}), 200
@@ -280,63 +287,100 @@ def training():
     return render_template('training.html',
                            username=current_user.username,
                            sessions=sessions_data)
-'''
-CODICE PER SALVARE I DATI NELLA CARTELLA DATI_PROVA
+
+def _window_intensity_max_mag(buffer):
+    """Intensità come max(|a|) nella finestra."""
+    try:
+        max_mag = 0.0
+        for p in buffer or []:
+            x = float(p.get('x', 0.0))
+            y = float(p.get('y', 0.0))
+            z = float(p.get('z', 0.0))
+            mag = (x*x + y*y + z*z) ** 0.5
+            if mag > max_mag:
+                max_mag = mag
+        return max_mag
+    except Exception:
+        return 0.0
+
 
 @app.route('/save_high_intensity', methods=['POST'])
+@login_required
 def save_high_intensity():
+    """
+    Riceve una finestra 'high-intensity' dal client,
+    la classifica col modello ML, aggiorna i contatori della SESSIONE
+    e salva su Firestore tramite DBManager.
+    """
     try:
-        data = request.get_json()
-        print("Ricevuto dal client:", data)
+        if not session.get('training_session_created', False) or 'training_session_id' not in session:
+            return jsonify({"status": "error", "message": "Nessuna sessione attiva"}), 400
 
-        if data is None:
-            return jsonify({"status": "error", "message": "Nessun JSON ricevuto"}), 400
+        session_id = session['training_session_id']
 
-        # Cartella relativa alla posizione del file main.py
-        save_dir = "data/dati_prova"
-        os.makedirs(save_dir, exist_ok=True)
-
-        file_path = os.path.join(save_dir, f"data_{data['timestamp']}.json")
-        
-        with open(file_path, 'w') as f:
-            json.dump(data, f, indent=2)
-
-        print("File salvato correttamente in:", file_path)
-        return jsonify({"status": "saved", "file_path": file_path})
-
-    except Exception as e:
-        import traceback
-        traceback.print_exc()
-        return jsonify({"status": "error", "message": str(e)}), 500
-'''
-model = PunchClassifier()
-model.model = joblib.load("trained_model.pkl")  # path relativo al file salvato
-print("Modello caricato, pronto per predizioni.")
-count_punnches = 0
-@app.route('/save_high_intensity', methods=['POST'])
-def save_high_intensity():
-    try:
         data = request.get_json()
         if data is None:
             return jsonify({"status": "error", "message": "Nessun JSON ricevuto"}), 400
 
+        # 1) Converte nel tuo tipo e classifica
         raw_action = RawAnnotatedAction.from_json(data, file_path="")
         annotated_action = AnnotatedAction.from_raw_annotated_action(raw_action)
 
         prediction = model.predict([annotated_action])[0]  # 0 o 1
         label_str = "non_punch" if prediction == 0 else "punch"
-        if label_str == "punch":
-            global count_punnches
-            count_punnches += 1
-            print(f"Numero totale di pugni rilevati: {count_punnches}")
-        print(f"Predicted label: {label_str} for timestamp {data['timestamp']}")
 
-        return jsonify({"status": "predicted", "label": label_str, "timestamp": data['timestamp']})
+        # 2) Calcola intensità della finestra
+        window_intensity = _window_intensity_max_mag(data.get('data', []))
+
+        # 3) Aggiorna i contatori nella sessione Flask
+        punch_count = session.get('ml_punch_count', 0)
+        total_intensity = float(session.get('ml_total_intensity', 0.0))
+
+        if label_str == "punch":
+            punch_count += 1
+            total_intensity += window_intensity
+
+            # 4) Aggiorna le stats persistenti della training session su Firestore
+            #    NB: update_session_stats(session_id, add_punches, add_total_intensity)
+            db_ok = db_manager.update_session_stats(session_id, 1, window_intensity)
+            if not db_ok:
+                # non rompiamo l'UX, ma segnaliamo l'errore
+                print(f"[WARN] Impossibile aggiornare stats su Firestore per session {session_id}")
+
+        # 5) Salva anche la finestra grezza + etichetta su Firestore (se vuoi tenerla)
+        #    Implementa nel tuo DBManager questo metodo (vedi snippet più sotto)
+        try:
+            db_manager.save_ml_window(
+                session_id=session_id,
+                timestamp=data.get('timestamp'),
+                label=label_str,
+                intensity=window_intensity,
+                window=data.get('data', [])
+            )
+        except Exception as e:
+            print(f"[WARN] Salvataggio finestra ML non riuscito: {e}")
+
+        # 6) Persiste i contatori aggiornati nella sessione Flask
+        session['ml_punch_count'] = punch_count
+        session['ml_total_intensity'] = total_intensity
+
+        avg_intensity = (total_intensity / punch_count) if punch_count > 0 else 0.0
+
+        # 7) Log chiaro e risposta per il client
+        print(f"[ML] label={label_str}  punches={punch_count}  avg_intensity={avg_intensity:.2f}")
+        return jsonify({
+            "status": "predicted",
+            "label": label_str,
+            "punch_count": punch_count,
+            "avg_intensity": round(avg_intensity, 2),
+            "timestamp": data.get('timestamp')
+        })
 
     except Exception as e:
         import traceback
         traceback.print_exc()
         return jsonify({"status": "error", "message": str(e)}), 500
+
 
 
 if __name__ == '__main__':

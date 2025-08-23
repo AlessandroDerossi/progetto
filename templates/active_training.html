@@ -402,26 +402,11 @@
 
         // Better punch detection with dynamic threshold
         if (magnitude > punchThreshold) {
-            // Record this punch
-            lastPunchTime = now;
-            punches++;
-            hasPunches = true;
-            isMagBelowMinRequired = false; // Reset to prevent detecting multiple punches in sequence
-
-            // Update intensity calculation (use actual magnitude not just threshold)
-            const punchIntensity = magnitude;
-            totalIntensity += punchIntensity;
-            const currentAvgIntensity = (totalIntensity / punches).toFixed(2);
-
-            // Update UI
-            punchCounter.textContent = punches;
-            avgIntensity.textContent = currentAvgIntensity;
-
-            // Show punch animation
+            // --- dentro detectPunch, quando magnitude > punchThreshold ---
             showPunchAnimation();
-
-            // Debug info
             debugInfo.textContent = MESSAGES.PUNCH_DETECTED + `${magnitude.toFixed(2)}`;
+            // NIENTE incrementi local: il conteggio lo fa il server via /save_high_intensity
+
         }
     }
 
@@ -505,7 +490,17 @@
     })
     .then(response => response.json())
     .then(data => {
-        console.log('High intensity window saved:', data.status);
+        if (data.status === 'predicted') {
+            // Aggiorna UI coi valori calcolati dal server/ML
+            punchCounter.textContent = data.punch_count ?? 0;
+            avgIntensity.textContent = (data.avg_intensity ?? 0).toFixed(2);
+
+            if (data.label === 'punch') {
+                showPunchAnimation();
+            }
+        } else {
+            console.warn('Server returned non-predicted status:', data);
+        }
     })
     .catch(error => console.error('Error sending high intensity window:', error));
     }
@@ -533,6 +528,8 @@
                     resumeButton.style.display = 'none';
                     pauseButton.disabled = false;
                     stopButton.disabled = false;
+                    punchCounter.textContent = '0';
+                    avgIntensity.textContent = '0.00';
 
                     debugInfo.textContent = "Allenamento iniziato! Sessione creata nel database.";
                 } else {
