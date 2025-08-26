@@ -18,6 +18,12 @@ login_manager.login_view = 'login'
 # Inizializzazione DBManager
 db_manager = DBManager('credentials.json', 'boxeproject')
 
+# Caricamento modello ML
+model = PunchClassifier()
+model.model = joblib.load("trained_model.pkl")  # path relativo al file salvato
+print("Modello caricato, pronto per predizioni.")
+count_punnches = 0
+
 
 # Funzione per caricare l'utente (ora usa DBManager)
 @login_manager.user_loader
@@ -282,42 +288,6 @@ def training():
                            sessions=sessions_data)
 
 
-'''
-CODICE PER SALVARE I DATI NELLA CARTELLA DATI_PROVA
-
-@app.route('/save_high_intensity', methods=['POST'])
-def save_high_intensity():
-    try:
-        data = request.get_json()
-        print("Ricevuto dal client:", data)
-
-        if data is None:
-            return jsonify({"status": "error", "message": "Nessun JSON ricevuto"}), 400
-
-        # Cartella relativa alla posizione del file main.py
-        save_dir = "data/dati_prova"
-        os.makedirs(save_dir, exist_ok=True)
-
-        file_path = os.path.join(save_dir, f"data_{data['timestamp']}.json")
-
-        with open(file_path, 'w') as f:
-            json.dump(data, f, indent=2)
-
-        print("File salvato correttamente in:", file_path)
-        return jsonify({"status": "saved", "file_path": file_path})
-
-    except Exception as e:
-        import traceback
-        traceback.print_exc()
-        return jsonify({"status": "error", "message": str(e)}), 500
-'''
-
-model = PunchClassifier()
-model.model = joblib.load("trained_model.pkl")  # path relativo al file salvato
-print("Modello caricato, pronto per predizioni.")
-count_punnches = 0
-
-
 @app.route('/save_high_intensity', methods=['POST'])
 def save_high_intensity():
     try:
@@ -340,20 +310,17 @@ def save_high_intensity():
             if 'training_session_id' in session:
                 session_id = session['training_session_id']
 
-                # Calcola intensità media dal buffer dei dati
-                total_magnitude = 0
-                for point in data['data']:
-                    magnitude = (point['x'] ** 2 + point['y'] ** 2 + point['z'] ** 2) ** 0.5
-                    total_magnitude += magnitude
-
-                avg_intensity = total_magnitude / len(data['data']) if data['data'] else 0
+                # Calcola picco massimo dal buffer dei dati
+                max_intensity = max(
+                    (point['x'] ** 2 + point['y'] ** 2 + point['z'] ** 2) ** 0.5
+                    for point in data['data']
+                ) if data['data'] else 0
 
                 # Aggiorna le statistiche della sessione nel database
-                # Incrementa di 1 pugno e aggiungi l'intensità
-                if db_manager.update_session_stats(session_id, 1, avg_intensity):
-                    print(f"Database aggiornato: +1 pugno, intensità {avg_intensity:.2f}")
+                if db_manager.update_session_stats(session_id, 1, max_intensity):
+                    print(f"Database aggiornato: +1 pugno, picco intensità {max_intensity:.2f}")
                 else:
-                    print("Errore nell'aggiornamento del database")
+                    print("Errore nell'aggiornamento del database.")
 
         print(f"Predicted label: {label_str} for timestamp {data['timestamp']}")
 
@@ -370,4 +337,4 @@ def save_high_intensity():
 
 
 if __name__ == '__main__':
-    app.run(host='0.0.0.0', port=222, debug=True)
+    app.run(host='0.0.0.0', port=5000, debug=True)
