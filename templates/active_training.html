@@ -170,20 +170,28 @@
         </div>
 
         <div class="row">
-            <div class="col-md-6">
+            <div class="col-md-4">
                 <div class="card">
                     <div class="card-body">
-                        <h5 class="card-title">Pugni Rilevati (AI)</h5>
+                        <h5 class="card-title">Pugni Rilevati</h5>
                         <p class="display-4 text-center" id="punchCounter">0</p>
                         <div class="punch-animation" id="punchAnimation"></div>
                     </div>
                 </div>
             </div>
-            <div class="col-md-6">
+            <div class="col-md-4">
                 <div class="card">
                     <div class="card-body">
                         <h5 class="card-title">Intensità Media</h5>
                         <p class="display-4 text-center" id="avgIntensity">0.00</p>
+                    </div>
+                </div>
+            </div>
+            <div class="col-md-4">
+                <div class="card">
+                    <div class="card-body">
+                        <h5 class="card-title">Intensità Ultimo Pugno</h5>
+                        <p class="display-4 text-center" id="lastPunchIntensity">0.00</p>
                     </div>
                 </div>
             </div>
@@ -219,6 +227,7 @@
     const avgIntensity = document.getElementById('avgIntensity');
     const debugInfo = document.getElementById('debugInfo');
     const punchAnimation = document.getElementById('punchAnimation');
+    const lastPunchIntensity = document.getElementById('lastPunchIntensity');
 
     let timer;
     let seconds = 0;
@@ -462,18 +471,20 @@
                 punches++;
                 hasPunches = true;
 
-                // Calcola intensità media (usando una stima dall'intensità del buffer)
-                const avgBufferIntensity = buffer.reduce((sum, point) => {
+                // Calcola intensità della finestra come il picco massimo
+                const peakBufferIntensity = buffer.reduce((max, point) => {
                     const magnitude = Math.sqrt(point.x*point.x + point.y*point.y + point.z*point.z);
-                    return sum + magnitude;
-                }, 0) / buffer.length;
+                    return Math.max(max, magnitude);
+                }, 0);
 
-                totalIntensity += avgBufferIntensity;
+                totalIntensity += peakBufferIntensity;
                 const currentAvgIntensity = (totalIntensity / punches).toFixed(2);
+
 
                 // Aggiorna UI
                 punchCounter.textContent = punches;
                 avgIntensity.textContent = currentAvgIntensity;
+                lastPunchIntensity.textContent = peakBufferIntensity.toFixed(2);
 
                 // Mostra animazione pugno
                 showPunchAnimation();
