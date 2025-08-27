@@ -148,12 +148,16 @@
             };
 
             const sessionDates = [{% for session in sessions %}'{{ session.date }}'{% if not loop.last %}, {% endif %}{% endfor %}];
-            const formattedDates = sessionDates.map(formatShortDate);
             const punchCounts = [{% for session in sessions %}{{ session.punch_count }}{% if not loop.last %}, {% endif %}{% endfor %}];
             const avgIntensities = [{% for session in sessions %}{{ session.avg_intensity }}{% if not loop.last %}, {% endif %}{% endfor %}];
 
             // Converti durata da secondi a minuti per una migliore visualizzazione
             const durations = [{% for session in sessions %}{{ session.duration / 60 }}{% if not loop.last %}, {% endif %}{% endfor %}];
+            
+            const formattedDates = sessionDates.map(formatShortDate).reverse();
+            const punchCountsRev = punchCounts.reverse();
+            const avgIntensitiesRev = avgIntensities.reverse();
+            const durationsRev = durations.reverse();
 
             // Grafico pugni per sessione
             const punchesCtx = document.getElementById('punchesChart').getContext('2d');
@@ -163,7 +167,7 @@
                     labels: formattedDates,
                     datasets: [{
                         label: 'Numero di pugni',
-                        data: punchCounts,
+                        data: punchCountsRev,
                         backgroundColor: 'rgba(200, 35, 51, 0.7)',
                         borderColor: 'rgba(200, 35, 51, 1)',
                         borderWidth: 1
@@ -198,7 +202,7 @@
                     labels: formattedDates,
                     datasets: [{
                         label: 'Intensità media',
-                        data: avgIntensities,
+                        data: avgIntensitiesRev,
                         backgroundColor: 'rgba(54, 162, 235, 0.2)',
                         borderColor: 'rgba(54, 162, 235, 1)',
                         borderWidth: 2,
@@ -235,7 +239,7 @@
                     labels: formattedDates,
                     datasets: [{
                         label: 'Durata (minuti)',
-                        data: durations,
+                        data: durationsRev,
                         backgroundColor: 'rgba(75, 192, 192, 0.2)',
                         borderColor: 'rgba(75, 192, 192, 1)',
                         borderWidth: 2,
