@@ -147,13 +147,21 @@
                 });
             };
 
+            // Funzione per convertire i minuti in formato mm:ss
+            const formatDuration = (minutes) => {
+                const totalSeconds = Math.round(minutes * 60);
+                const mins = Math.floor(totalSeconds / 60);
+                const secs = totalSeconds % 60;
+                return `${mins}:${secs.toString().padStart(2, '0')}`;
+            };
+
             const sessionDates = [{% for session in sessions %}'{{ session.date }}'{% if not loop.last %}, {% endif %}{% endfor %}];
             const punchCounts = [{% for session in sessions %}{{ session.punch_count }}{% if not loop.last %}, {% endif %}{% endfor %}];
             const avgIntensities = [{% for session in sessions %}{{ session.avg_intensity }}{% if not loop.last %}, {% endif %}{% endfor %}];
 
             // Converti durata da secondi a minuti per una migliore visualizzazione
-            const durations = [{% for session in sessions %}{{ session.duration / 60 }}{% if not loop.last %}, {% endif %}{% endfor %}];
-            
+            const durations = [{% for session in sessions %}{{ session.duration}}{% if not loop.last %}, {% endif %}{% endfor %}];
+
             const formattedDates = sessionDates.map(formatShortDate).reverse();
             const punchCountsRev = punchCounts.reverse();
             const avgIntensitiesRev = avgIntensities.reverse();
@@ -238,7 +246,7 @@
                 data: {
                     labels: formattedDates,
                     datasets: [{
-                        label: 'Durata (minuti)',
+                        label: 'Durata (mm:ss)',
                         data: durationsRev,
                         backgroundColor: 'rgba(75, 192, 192, 0.2)',
                         borderColor: 'rgba(75, 192, 192, 1)',
@@ -255,13 +263,29 @@
                             beginAtZero: true,
                             title: {
                                 display: true,
-                                text: 'Minuti'
+                                text: 'Durata (mm:ss)'
+                            },
+                            ticks: {
+                                // Personalizza il formato dei tick sull'asse Y
+                                callback: function(value, index, ticks) {
+                                    return formatDuration(value);
+                                }
                             }
                         },
                         x: {
                             title: {
                                 display: true,
                                 text: 'Data sessione'
+                            }
+                        }
+                    },
+                    plugins: {
+                        tooltip: {
+                            callbacks: {
+                                // Personalizza il tooltip per mostrare il formato mm:ss
+                                label: function(context) {
+                                    return context.dataset.label + ': ' + formatDuration(context.parsed.y);
+                                }
                             }
                         }
                     }

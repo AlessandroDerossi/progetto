@@ -114,16 +114,21 @@ def dashboard():
 def stats():
     user_id = current_user.id
 
-    # Prendi le training sessions dell'utente usando DBManager
-    sessions_data = db_manager.get_user_sessions(user_id)
+    # Prendi SOLO le training sessions dell'utente con pugni (valid_only=True)
+    sessions_data = db_manager.get_user_sessions(user_id, valid_only=True)
+
+    # Filtro aggiuntivo per essere sicuri di escludere sessioni con 0 pugni o durata 0
+    valid_sessions = []
+    for session in sessions_data:
+        if session.get('punch_count', 0) > 0 and session.get('duration', 0) > 0:
+            valid_sessions.append(session)
 
     # Ordina per data (più recenti prima)
-    sessions_data.sort(key=lambda x: x['date'], reverse=True)
+    valid_sessions.sort(key=lambda x: x['date'], reverse=True)
 
     return render_template('stats.html',
-                           sessions=sessions_data,
+                           sessions=valid_sessions,
                            username=current_user.username)
-
 
 @app.route('/start_session', methods=['POST'])
 @login_required

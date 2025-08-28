@@ -344,18 +344,6 @@
                     highIntensityBuffer = []; // Reset buffer
                 }
             }
-
-            // Solo i dati significativi vanno nel buffer normale (sopra una soglia minima)
-            if (magnitude > baselineAcceleration/2) {
-                // Add to buffer
-                dataBuffer.push({
-                    x: x,
-                    y: y,
-                    z: z,
-                    magnitude: magnitude,
-                    timestamp: Date.now()
-                });
-            }
         };
 
         sensor.onerror = function(event) {

@@ -163,15 +163,26 @@
         {% if sessions %}
             {% for session in sessions %}
                 <div class="session-card">
-                    <div class="session-title">Sessione del {{ session.date }}</div>
+                    <div class="session-title">
+                        Sessione del <span class="formatted-date" data-date="{{ session.date }}">{{ session.date }}</span>
+                    </div>
                     <div class="session-details">
                         <div class="stat-box">
                             <div class="stat-value">
-                                {% if session.duration < 1 %}
-                                    {{ (session.duration * 60)|int }} sec
-                                {% else %}
-                                    {{ session.duration|round(1) }} min
-                                {% endif %}
+                                <script>
+                                    document.write((function() {
+                                        const minutes = {{ session.duration }};
+                                        const totalSeconds = Math.round(minutes * 60);
+
+                                        if (totalSeconds < 60) {
+                                            return totalSeconds + ' sec';
+                                        } else {
+                                            const mins = Math.floor(totalSeconds / 60);
+                                            const secs = totalSeconds % 60;
+                                            return mins + ':' + secs.toString().padStart(2, '0') + ' min';
+                                        }
+                                    })());
+                                </script>
                             </div>
                             <div class="stat-label">Durata</div>
                         </div>
@@ -195,5 +206,47 @@
     </div>
 
     <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0-alpha1/dist/js/bootstrap.bundle.min.js"></script>
+
+    <script>
+        // Formatta le date in formato italiano (gg/mm/aaaa)
+        document.addEventListener('DOMContentLoaded', function() {
+            const dateElements = document.querySelectorAll('.formatted-date');
+
+            dateElements.forEach(function(element) {
+                const dateString = element.getAttribute('data-date');
+
+                try {
+                    // Prova diversi formati di data
+                    let date;
+
+                    // Se la data è già in formato gg/mm/aaaa, lasciala così
+                    if (dateString.match(/^\d{2}\/\d{2}\/\d{4}$/)) {
+                        element.textContent = dateString;
+                        return;
+                    }
+
+                    // Se è in formato ISO (aaaa-mm-gg) o simile
+                    if (dateString.includes('-')) {
+                        date = new Date(dateString);
+                    } else {
+                        // Prova a parsare altri formati
+                        date = new Date(dateString);
+                    }
+
+                    // Verifica che la data sia valida
+                    if (!isNaN(date.getTime())) {
+                        // Formatta in italiano: gg/mm/aaaa
+                        const day = date.getDate().toString().padStart(2, '0');
+                        const month = (date.getMonth() + 1).toString().padStart(2, '0');
+                        const year = date.getFullYear();
+                        element.textContent = `${day}/${month}/${year}`;
+                    }
+                } catch (error) {
+                    // Se c'è un errore, lascia la data originale
+                    console.log('Errore nel formato della data:', dateString);
+                }
+            });
+        });
+    </script>
 </body>
 </html>
