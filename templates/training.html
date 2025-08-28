@@ -126,6 +126,24 @@
                 </div>
             </div>
         </div>
+
+        <!-- Nuovo grafico per la frequenza dei pugni -->
+        <div class="row">
+            <div class="col-md-12">
+                <div class="card">
+                    <div class="card-body">
+                        <h5 class="card-title">Frequenza dei pugni (pugni al minuto)</h5>
+                        <div class="chart-container">
+                            {% if sessions %}
+                                <canvas id="frequencyChart"></canvas>
+                            {% else %}
+                                <div class="no-data-message">Non ci sono dati sufficienti per visualizzare questo grafico</div>
+                            {% endif %}
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </div>
     </div>
 
     <footer class="bg-light text-center py-3 mt-5">
@@ -162,10 +180,17 @@
             // Converti durata da secondi a minuti per una migliore visualizzazione
             const durations = [{% for session in sessions %}{{ session.duration}}{% if not loop.last %}, {% endif %}{% endfor %}];
 
+            // Calcola la frequenza dei pugni (pugni al minuto)
+            const punchFrequencies = punchCounts.map((punches, index) => {
+                const durationInMinutes = durations[index];
+                return durationInMinutes > 0 ? (punches / durationInMinutes) : 0;
+            });
+
             const formattedDates = sessionDates.map(formatShortDate).reverse();
             const punchCountsRev = punchCounts.reverse();
             const avgIntensitiesRev = avgIntensities.reverse();
             const durationsRev = durations.reverse();
+            const punchFrequenciesRev = punchFrequencies.reverse();
 
             // Grafico pugni per sessione
             const punchesCtx = document.getElementById('punchesChart').getContext('2d');
@@ -285,6 +310,57 @@
                                 // Personalizza il tooltip per mostrare il formato mm:ss
                                 label: function(context) {
                                     return context.dataset.label + ': ' + formatDuration(context.parsed.y);
+                                }
+                            }
+                        }
+                    }
+                }
+            });
+
+            // Grafico frequenza pugni (pugni al minuto)
+            const frequencyCtx = document.getElementById('frequencyChart').getContext('2d');
+            const frequencyChart = new Chart(frequencyCtx, {
+                type: 'line',
+                data: {
+                    labels: formattedDates,
+                    datasets: [{
+                        label: 'Pugni al minuto',
+                        data: punchFrequenciesRev,
+                        backgroundColor: 'rgba(255, 159, 64, 0.2)',
+                        borderColor: 'rgba(255, 159, 64, 1)',
+                        borderWidth: 2,
+                        tension: 0.1,
+                        fill: true
+                    }]
+                },
+                options: {
+                    responsive: true,
+                    maintainAspectRatio: false,
+                    scales: {
+                        y: {
+                            beginAtZero: true,
+                            title: {
+                                display: true,
+                                text: 'Pugni al minuto'
+                            },
+                            ticks: {
+                                callback: function(value, index, ticks) {
+                                    return value.toFixed(1);
+                                }
+                            }
+                        },
+                        x: {
+                            title: {
+                                display: true,
+                                text: 'Data sessione'
+                            }
+                        }
+                    },
+                    plugins: {
+                        tooltip: {
+                            callbacks: {
+                                label: function(context) {
+                                    return context.dataset.label + ': ' + context.parsed.y.toFixed(1);
                                 }
                             }
                         }
