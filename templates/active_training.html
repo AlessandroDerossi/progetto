@@ -60,30 +60,7 @@
             color: white;
             opacity: 0.95;
         }
-        .btn-resume {
-            background-color: #28a745;
-            border-color: #28a745;
-            color: white;
-            font-weight: bold;
-        }
-        .btn-resume:hover {
-            background-color: #218838;
-            border-color: #1e7e34;
-            color: white;
-            opacity: 0.95;
-        }
-        .btn-pause {
-            background-color: #ffc107;
-            border-color: #ffc107;
-            color: #212529;
-            font-weight: bold;
-        }
-        .btn-pause:hover {
-            background-color: #e0a800;
-            border-color: #d39e00;
-            color: #212529;
-            opacity: 0.95;
-        }
+
         .btn-stop {
             background-color: #dc3545;
             border-color: #dc3545;
@@ -160,7 +137,6 @@
                         <div class="timer" id="timer">00:00:00</div>
                         <div class="control-buttons">
                             <button id="startButton" class="btn btn-start">Inizia</button>
-                            <button id="resumeButton" class="btn btn-resume" style="display: none;">Riprendi</button>
                             <button id="stopButton" class="btn btn-stop" disabled>Termina</button>
                         </div>
                     </div>
@@ -227,8 +203,6 @@
     <script>
         document.addEventListener('DOMContentLoaded', function() {
     const startButton = document.getElementById('startButton');
-    const resumeButton = document.getElementById('resumeButton');
-    const pauseButton = document.getElementById('pauseButton');
     const stopButton = document.getElementById('stopButton');
     const timerDisplay = document.getElementById('timer');
     const punchCounter = document.getElementById('punchCounter');
@@ -521,8 +495,6 @@
                         timer = setInterval(updateTimer, 1000);
 
                         startButton.style.display = 'none';
-                        resumeButton.style.display = 'none';
-                        pauseButton.disabled = false;
                         stopButton.disabled = false;
 
                         debugInfo.textContent = "Allenamento iniziato! Solo l'AI rileva i pugni.";
@@ -539,40 +511,6 @@
                 alert('Errore di connessione nella creazione della sessione');
                 debugInfo.textContent = 'Errore di connessione nella creazione della sessione';
             });
-        }
-    });
-
-    resumeButton.addEventListener('click', function() {
-        if (!isRunning) {
-            isRunning = true;
-            timer = setInterval(updateTimer, 1000);
-
-            if (sensor && sensor.activated) {
-                // Sensor is already active, just resume processing readings
-                debugInfo.textContent = MESSAGES.RUNNING;
-            } else {
-                // Try to restart the sensor
-                initAccelerometer();
-            }
-
-            resumeButton.style.display = 'none';
-            pauseButton.disabled = false;
-        }
-    });
-
-    pauseButton.addEventListener('click', function() {
-        if (isRunning) {
-            isRunning = false;
-            clearInterval(timer);
-
-            // We don't stop the sensor, just stop processing readings
-            debugInfo.textContent = MESSAGES.PAUSED;
-
-            resumeButton.style.display = 'inline-block';
-            pauseButton.disabled = true;
-
-            // Upload any remaining data
-            uploadDataBuffer();
         }
     });
 
