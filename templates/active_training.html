@@ -161,7 +161,6 @@
                         <div class="control-buttons">
                             <button id="startButton" class="btn btn-start">Inizia</button>
                             <button id="resumeButton" class="btn btn-resume" style="display: none;">Riprendi</button>
-                            <button id="pauseButton" class="btn btn-pause" disabled>Pausa</button>
                             <button id="stopButton" class="btn btn-stop" disabled>Termina</button>
                         </div>
                     </div>
@@ -170,7 +169,7 @@
         </div>
 
         <div class="row">
-            <div class="col-md-4">
+            <div class="col-md-6">
                 <div class="card">
                     <div class="card-body">
                         <h5 class="card-title">Pugni Rilevati</h5>
@@ -179,7 +178,7 @@
                     </div>
                 </div>
             </div>
-            <div class="col-md-4">
+            <div class="col-md-6">
                 <div class="card">
                     <div class="card-body">
                         <h5 class="card-title">Intensità Media</h5>
@@ -187,11 +186,20 @@
                     </div>
                 </div>
             </div>
-            <div class="col-md-4">
+            <div class="col-md-6">
                 <div class="card">
                     <div class="card-body">
                         <h5 class="card-title">Intensità Ultimo Pugno</h5>
                         <p class="display-4 text-center" id="lastPunchIntensity">0.00</p>
+                    </div>
+                </div>
+            </div>
+            <div class="col-md-6">
+                <div class="card">
+                    <div class="card-body">
+                        <h5 class="card-title">Frequenza Pugni</h5>
+                        <p class="display-4 text-center" id="punchFrequency">0.00</p>
+                        <small class="d-block text-center">pugni/min</small>
                     </div>
                 </div>
             </div>
@@ -228,6 +236,7 @@
     const debugInfo = document.getElementById('debugInfo');
     const punchAnimation = document.getElementById('punchAnimation');
     const lastPunchIntensity = document.getElementById('lastPunchIntensity');
+    const punchFrequency = document.getElementById('punchFrequency');
 
     let timer;
     let seconds = 0;
@@ -235,6 +244,7 @@
     let punches = 0;
     let totalIntensity = 0;
     let hasPunches = false;
+    let startTime = null;
 
     // Accelerometer variables
     let sensor = null;
@@ -478,6 +488,11 @@
                 showPunchAnimation();
 
                 debugInfo.textContent = MESSAGES.PUNCH_DETECTED + punches;
+
+                const elapsedMinutes = (Date.now() - startTime) / 60000; // tempo in minuti
+                const frequency = punches / elapsedMinutes;
+                punchFrequency.textContent = frequency.toFixed(2);
+
             } else {
                 // Movimento non classificato come pugno
                 console.log('Movimento non classificato come pugno');
@@ -502,6 +517,7 @@
                     // Solo se la sessione è stata creata con successo, inizia l'allenamento
                     if (initAccelerometer()) {
                         isRunning = true;
+                        startTime = Date.now();
                         timer = setInterval(updateTimer, 1000);
 
                         startButton.style.display = 'none';
