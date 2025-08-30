@@ -45,25 +45,25 @@ def register():
 
         # Validazione base
         if not username or not password or not email:
-            flash('Username, password ed email sono obbligatori!')
+            flash('Tutti i campi sono obbligatori!')
             return render_template('register.html')
 
         # Controlla se username esiste già
         if db_manager.check_username_exists(username):
-            flash('Username già esistente. Prova con credenziali diverse.')
+            flash('Username già esistente.')
             return render_template('register.html')
 
         # Controlla se email esiste già
         if db_manager.check_email_exists(email):
-            flash('Email già esistente. Prova con credenziali diverse.')
+            flash('Email già registrata.')
             return render_template('register.html')
 
         # Crea nuovo utente
         if db_manager.create_user(username, password, email):
-            flash('Registrazione completata con successo! Ora puoi accedere.')
+            flash('Registrazione completata! Ora puoi accedere.')
             return redirect(url_for('login'))
         else:
-            flash('Errore durante la registrazione. Riprova più tardi.')
+            flash('Errore durante la registrazione.')
             return render_template('register.html')
 
     return render_template('register.html')
@@ -86,7 +86,7 @@ def login():
             next_page = request.values.get('next', '/dashboard')
             return redirect(next_page)
         else:
-            flash('Username o password non validi.')
+            flash('Credenziali non valide.')
 
     return render_template('login.html')
 
@@ -95,7 +95,7 @@ def login():
 @login_required
 def logout():
     logout_user()
-    flash('Hai effettuato il logout con successo.')
+    flash('Logout effettuato con successo.')
     return redirect(url_for('login'))
 
 
@@ -134,6 +134,7 @@ def stats():
     return render_template('stats.html',
                            sessions=valid_sessions,
                            username=current_user.username)
+
 
 @app.route('/start_session', methods=['POST'])
 @login_required
@@ -194,7 +195,7 @@ def end_session():
         session.pop('training_user_id', None)
         session.pop('training_start_time', None)
         session.pop('training_session_created', None)
-        return json.dumps({'status': 'cancelled', 'message': 'Sessione annullata (mai iniziata)'}), 200
+        return json.dumps({'status': 'cancelled', 'message': 'Sessione annullata'}), 200
 
     # Se la sessione esiste nel database
     if 'training_session_id' in session:
@@ -223,8 +224,7 @@ def end_session():
             session.pop('training_start_time', None)
             session.pop('training_session_created', None)
 
-            return json.dumps(
-                {'status': 'deleted', 'message': 'Sessione eliminata perché non conteneva pugni'}), 200
+            return json.dumps({'status': 'deleted', 'message': 'Sessione eliminata'}), 200
         else:
             # Calcola e aggiorna la durata usando DBManager
             duration_minutes = db_manager.calculate_session_duration(session_id)
@@ -265,10 +265,6 @@ def upload_data_buffer():
         if not db_manager.save_accelerations(new_accelerations):
             return 'Error saving accelerations', 500
 
-        # NON aggiornare più le statistiche qui, lo fa solo il modello ML
-        # if not db_manager.update_session_stats(session_id, new_punch_count, total_new_intensity):
-        #     return 'Error updating session stats', 500
-
         return 'Data saved successfully', 200
 
     except Exception as e:
@@ -291,6 +287,7 @@ def training():
                            username=current_user.username,
                            sessions=sessions_data)
 
+
 @app.route('/save_high_intensity', methods=['POST'])
 def save_high_intensity():
     try:
@@ -305,21 +302,19 @@ def save_high_intensity():
         label_str = "non_punch" if prediction == 0 else "punch"
 
         if label_str == "punch":
-
             # AGGIORNAMENTO DATABASE: Aggiorna il database con il pugno rilevato dal modello ML
             if 'training_session_id' in session:
                 session_id = session['training_session_id']
 
                 # Calcola intensità massima dal buffer dei dati
                 peak_intensity = max(
-                    (point['x']**2 + point['y']**2 + point['z']**2)**0.5
-                     for point in data['data']
-)
+                    (point['x'] ** 2 + point['y'] ** 2 + point['z'] ** 2) ** 0.5
+                    for point in data['data']
+                )
                 if db_manager.update_session_stats(session_id, 1, peak_intensity):
                     print(f"Database aggiornato: +1 pugno, intensità {peak_intensity:.2f}")
                 else:
                     print("Errore nell'aggiornamento del database")
-
 
         print(f"Predicted label: {label_str} for timestamp {data['timestamp']}")
 
