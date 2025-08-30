@@ -35,6 +35,12 @@
             color: #6c757d;
             font-style: italic;
         }
+        .chart-filter {
+            margin-bottom: 15px;
+        }
+        .chart-filter select {
+            max-width: 200px;
+        }
     </style>
 </head>
 <body>
@@ -83,7 +89,17 @@
             <div class="col-md-12">
                 <div class="card">
                     <div class="card-body">
-                        <h5 class="card-title">Grafico dei pugni per sessione</h5>
+                        <div class="d-flex justify-content-between align-items-center mb-3">
+                            <h5 class="card-title mb-0">Grafico dei pugni per sessione</h5>
+                            <div class="chart-filter">
+                                <select class="form-select" id="punchesFilter" onchange="updateChart('punches')">
+                                    <option value="all">Sempre</option>
+                                    <option value="year">Ultimo anno</option>
+                                    <option value="6months">Ultimi 6 mesi</option>
+                                    <option value="week">Ultima settimana</option>
+                                </select>
+                            </div>
+                        </div>
                         <div class="chart-container">
                             {% if sessions %}
                                 <canvas id="punchesChart"></canvas>
@@ -100,7 +116,17 @@
             <div class="col-md-6">
                 <div class="card">
                     <div class="card-body">
-                        <h5 class="card-title">Grafico dell'intensità media</h5>
+                        <div class="d-flex justify-content-between align-items-center mb-3">
+                            <h5 class="card-title mb-0">Grafico dell'intensità media</h5>
+                            <div class="chart-filter">
+                                <select class="form-select" id="intensityFilter" onchange="updateChart('intensity')">
+                                    <option value="all">Sempre</option>
+                                    <option value="year">Ultimo anno</option>
+                                    <option value="6months">Ultimi 6 mesi</option>
+                                    <option value="week">Ultima settimana</option>
+                                </select>
+                            </div>
+                        </div>
                         <div class="chart-container">
                             {% if sessions %}
                                 <canvas id="intensityChart"></canvas>
@@ -114,7 +140,17 @@
             <div class="col-md-6">
                 <div class="card">
                     <div class="card-body">
-                        <h5 class="card-title">Durata degli allenamenti</h5>
+                        <div class="d-flex justify-content-between align-items-center mb-3">
+                            <h5 class="card-title mb-0">Durata degli allenamenti</h5>
+                            <div class="chart-filter">
+                                <select class="form-select" id="durationFilter" onchange="updateChart('duration')">
+                                    <option value="all">Sempre</option>
+                                    <option value="year">Ultimo anno</option>
+                                    <option value="6months">Ultimi 6 mesi</option>
+                                    <option value="week">Ultima settimana</option>
+                                </select>
+                            </div>
+                        </div>
                         <div class="chart-container">
                             {% if sessions %}
                                 <canvas id="durationChart"></canvas>
@@ -127,12 +163,22 @@
             </div>
         </div>
 
-        <!-- Nuovo grafico per la frequenza dei pugni -->
+        <!-- Grafico per la frequenza dei pugni -->
         <div class="row">
             <div class="col-md-12">
                 <div class="card">
                     <div class="card-body">
-                        <h5 class="card-title">Frequenza dei pugni (pugni al minuto)</h5>
+                        <div class="d-flex justify-content-between align-items-center mb-3">
+                            <h5 class="card-title mb-0">Frequenza dei pugni (pugni al minuto)</h5>
+                            <div class="chart-filter">
+                                <select class="form-select" id="frequencyFilter" onchange="updateChart('frequency')">
+                                    <option value="all">Sempre</option>
+                                    <option value="year">Ultimo anno</option>
+                                    <option value="6months">Ultimi 6 mesi</option>
+                                    <option value="week">Ultima settimana</option>
+                                </select>
+                            </div>
+                        </div>
                         <div class="chart-container">
                             {% if sessions %}
                                 <canvas id="frequencyChart"></canvas>
@@ -154,9 +200,19 @@
 
     <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0-alpha1/dist/js/bootstrap.bundle.min.js"></script>
     <script>
-        // Dati per i grafici
+        // Variabili globali per i grafici
+        let punchesChart, intensityChart, durationChart, frequencyChart;
+
+        // Dati originali (tutti i dati)
         {% if sessions %}
-            // Formatta le date per una visualizzazione più leggibile
+            const originalData = {
+                dates: [{% for session in sessions %}'{{ session.date }}'{% if not loop.last %}, {% endif %}{% endfor %}],
+                punchCounts: [{% for session in sessions %}{{ session.punch_count }}{% if not loop.last %}, {% endif %}{% endfor %}],
+                avgIntensities: [{% for session in sessions %}{{ session.avg_intensity }}{% if not loop.last %}, {% endif %}{% endfor %}],
+                durations: [{% for session in sessions %}{{ session.duration }}{% if not loop.last %}, {% endif %}{% endfor %}]
+            };
+
+            // Funzioni di utilità
             const formatShortDate = (dateStr) => {
                 const date = new Date(dateStr);
                 return date.toLocaleDateString('it-IT', {
@@ -165,7 +221,6 @@
                 });
             };
 
-            // Funzione per convertire i minuti in formato mm:ss
             const formatDuration = (minutes) => {
                 const totalSeconds = Math.round(minutes * 60);
                 const mins = Math.floor(totalSeconds / 60);
@@ -173,199 +228,279 @@
                 return `${mins}:${secs.toString().padStart(2, '0')}`;
             };
 
-            const sessionDates = [{% for session in sessions %}'{{ session.date }}'{% if not loop.last %}, {% endif %}{% endfor %}];
-            const punchCounts = [{% for session in sessions %}{{ session.punch_count }}{% if not loop.last %}, {% endif %}{% endfor %}];
-            const avgIntensities = [{% for session in sessions %}{{ session.avg_intensity }}{% if not loop.last %}, {% endif %}{% endfor %}];
+            // Funzione per filtrare i dati in base al periodo selezionato
+            const filterDataByPeriod = (period) => {
+                const now = new Date();
+                let cutoffDate;
 
-            // Converti durata da secondi a minuti per una migliore visualizzazione
-            const durations = [{% for session in sessions %}{{ session.duration}}{% if not loop.last %}, {% endif %}{% endfor %}];
-
-            // Calcola la frequenza dei pugni (pugni al minuto)
-            const punchFrequencies = punchCounts.map((punches, index) => {
-                const durationInMinutes = durations[index];
-                return durationInMinutes > 0 ? (punches / durationInMinutes) : 0;
-            });
-
-            const formattedDates = sessionDates.map(formatShortDate).reverse();
-            const punchCountsRev = punchCounts.reverse();
-            const avgIntensitiesRev = avgIntensities.reverse();
-            const durationsRev = durations.reverse();
-            const punchFrequenciesRev = punchFrequencies.reverse();
-
-            // Grafico pugni per sessione
-            const punchesCtx = document.getElementById('punchesChart').getContext('2d');
-            const punchesChart = new Chart(punchesCtx, {
-                type: 'bar',
-                data: {
-                    labels: formattedDates,
-                    datasets: [{
-                        label: 'Numero di pugni',
-                        data: punchCountsRev,
-                        backgroundColor: 'rgba(200, 35, 51, 0.7)',
-                        borderColor: 'rgba(200, 35, 51, 1)',
-                        borderWidth: 1
-                    }]
-                },
-                options: {
-                    responsive: true,
-                    maintainAspectRatio: false,
-                    scales: {
-                        y: {
-                            beginAtZero: true,
-                            title: {
-                                display: true,
-                                text: 'Numero di pugni'
-                            }
-                        },
-                        x: {
-                            title: {
-                                display: true,
-                                text: 'Data sessione'
-                            }
-                        }
-                    }
+                switch(period) {
+                    case 'week':
+                        cutoffDate = new Date(now.getTime() - 7 * 24 * 60 * 60 * 1000);
+                        break;
+                    case '6months':
+                        cutoffDate = new Date(now.getFullYear(), now.getMonth() - 6, now.getDate());
+                        break;
+                    case 'year':
+                        cutoffDate = new Date(now.getFullYear() - 1, now.getMonth(), now.getDate());
+                        break;
+                    case 'all':
+                    default:
+                        return {
+                            dates: originalData.dates,
+                            punchCounts: originalData.punchCounts,
+                            avgIntensities: originalData.avgIntensities,
+                            durations: originalData.durations
+                        };
                 }
-            });
 
-            // Grafico intensità media
-            const intensityCtx = document.getElementById('intensityChart').getContext('2d');
-            const intensityChart = new Chart(intensityCtx, {
-                type: 'line',
-                data: {
-                    labels: formattedDates,
-                    datasets: [{
-                        label: 'Intensità media',
-                        data: avgIntensitiesRev,
-                        backgroundColor: 'rgba(54, 162, 235, 0.2)',
-                        borderColor: 'rgba(54, 162, 235, 1)',
-                        borderWidth: 2,
-                        tension: 0.1,
-                        fill: true
-                    }]
-                },
-                options: {
-                    responsive: true,
-                    maintainAspectRatio: false,
-                    scales: {
-                        y: {
-                            beginAtZero: true,
-                            title: {
-                                display: true,
-                                text: 'Intensità'
-                            }
-                        },
-                        x: {
-                            title: {
-                                display: true,
-                                text: 'Data sessione'
-                            }
-                        }
+                const filteredIndices = [];
+                originalData.dates.forEach((dateStr, index) => {
+                    const sessionDate = new Date(dateStr);
+                    if (sessionDate >= cutoffDate) {
+                        filteredIndices.push(index);
                     }
-                }
-            });
+                });
 
-            // Grafico durata allenamenti
-            const durationCtx = document.getElementById('durationChart').getContext('2d');
-            const durationChart = new Chart(durationCtx, {
-                type: 'line',
-                data: {
-                    labels: formattedDates,
-                    datasets: [{
-                        label: 'Durata (mm:ss)',
-                        data: durationsRev,
-                        backgroundColor: 'rgba(75, 192, 192, 0.2)',
-                        borderColor: 'rgba(75, 192, 192, 1)',
-                        borderWidth: 2,
-                        tension: 0.1,
-                        fill: true
-                    }]
-                },
-                options: {
-                    responsive: true,
-                    maintainAspectRatio: false,
-                    scales: {
-                        y: {
-                            beginAtZero: true,
-                            title: {
-                                display: true,
-                                text: 'Durata (mm:ss)'
-                            },
-                            ticks: {
-                                // Personalizza il formato dei tick sull'asse Y
-                                callback: function(value, index, ticks) {
-                                    return formatDuration(value);
-                                }
-                            }
-                        },
-                        x: {
-                            title: {
-                                display: true,
-                                text: 'Data sessione'
-                            }
-                        }
+                return {
+                    dates: filteredIndices.map(i => originalData.dates[i]),
+                    punchCounts: filteredIndices.map(i => originalData.punchCounts[i]),
+                    avgIntensities: filteredIndices.map(i => originalData.avgIntensities[i]),
+                    durations: filteredIndices.map(i => originalData.durations[i])
+                };
+            };
+
+            // Funzione per aggiornare un grafico specifico
+            const updateChart = (chartType) => {
+                const filterId = chartType + 'Filter';
+                const selectedPeriod = document.getElementById(filterId).value;
+                const filteredData = filterDataByPeriod(selectedPeriod);
+
+                // Calcola frequenza pugni per i dati filtrati
+                const punchFrequencies = filteredData.punchCounts.map((punches, index) => {
+                    const durationInMinutes = filteredData.durations[index];
+                    return durationInMinutes > 0 ? (punches / durationInMinutes) : 0;
+                });
+
+                // Formatta le date e inverti l'ordine (più vecchie prima per il grafico)
+                const formattedDates = filteredData.dates.map(formatShortDate).reverse();
+                const punchCountsRev = [...filteredData.punchCounts].reverse();
+                const avgIntensitiesRev = [...filteredData.avgIntensities].reverse();
+                const durationsRev = [...filteredData.durations].reverse();
+                const punchFrequenciesRev = [...punchFrequencies].reverse();
+
+                // Aggiorna il grafico specifico
+                switch(chartType) {
+                    case 'punches':
+                        punchesChart.data.labels = formattedDates;
+                        punchesChart.data.datasets[0].data = punchCountsRev;
+                        punchesChart.update();
+                        break;
+                    case 'intensity':
+                        intensityChart.data.labels = formattedDates;
+                        intensityChart.data.datasets[0].data = avgIntensitiesRev;
+                        intensityChart.update();
+                        break;
+                    case 'duration':
+                        durationChart.data.labels = formattedDates;
+                        durationChart.data.datasets[0].data = durationsRev;
+                        durationChart.update();
+                        break;
+                    case 'frequency':
+                        frequencyChart.data.labels = formattedDates;
+                        frequencyChart.data.datasets[0].data = punchFrequenciesRev;
+                        frequencyChart.update();
+                        break;
+                }
+            };
+
+            // Inizializzazione dei grafici
+            document.addEventListener('DOMContentLoaded', function() {
+                // Dati iniziali (tutti i dati)
+                const initialData = filterDataByPeriod('all');
+                const initialPunchFrequencies = initialData.punchCounts.map((punches, index) => {
+                    const durationInMinutes = initialData.durations[index];
+                    return durationInMinutes > 0 ? (punches / durationInMinutes) : 0;
+                });
+
+                const formattedDates = initialData.dates.map(formatShortDate).reverse();
+                const punchCountsRev = [...initialData.punchCounts].reverse();
+                const avgIntensitiesRev = [...initialData.avgIntensities].reverse();
+                const durationsRev = [...initialData.durations].reverse();
+                const punchFrequenciesRev = [...initialPunchFrequencies].reverse();
+
+                // Grafico pugni per sessione
+                const punchesCtx = document.getElementById('punchesChart').getContext('2d');
+                punchesChart = new Chart(punchesCtx, {
+                    type: 'bar',
+                    data: {
+                        labels: formattedDates,
+                        datasets: [{
+                            label: 'Numero di pugni',
+                            data: punchCountsRev,
+                            backgroundColor: 'rgba(200, 35, 51, 0.7)',
+                            borderColor: 'rgba(200, 35, 51, 1)',
+                            borderWidth: 1
+                        }]
                     },
-                    plugins: {
-                        tooltip: {
-                            callbacks: {
-                                // Personalizza il tooltip per mostrare il formato mm:ss
-                                label: function(context) {
-                                    return context.dataset.label + ': ' + formatDuration(context.parsed.y);
+                    options: {
+                        responsive: true,
+                        maintainAspectRatio: false,
+                        scales: {
+                            y: {
+                                beginAtZero: true,
+                                title: {
+                                    display: true,
+                                    text: 'Numero di pugni'
+                                }
+                            },
+                            x: {
+                                title: {
+                                    display: true,
+                                    text: 'Data sessione'
                                 }
                             }
                         }
                     }
-                }
-            });
+                });
 
-            // Grafico frequenza pugni (pugni al minuto)
-            const frequencyCtx = document.getElementById('frequencyChart').getContext('2d');
-            const frequencyChart = new Chart(frequencyCtx, {
-                type: 'line',
-                data: {
-                    labels: formattedDates,
-                    datasets: [{
-                        label: 'Pugni al minuto',
-                        data: punchFrequenciesRev,
-                        backgroundColor: 'rgba(255, 159, 64, 0.2)',
-                        borderColor: 'rgba(255, 159, 64, 1)',
-                        borderWidth: 2,
-                        tension: 0.1,
-                        fill: true
-                    }]
-                },
-                options: {
-                    responsive: true,
-                    maintainAspectRatio: false,
-                    scales: {
-                        y: {
-                            beginAtZero: true,
-                            title: {
-                                display: true,
-                                text: 'Pugni al minuto'
+                // Grafico intensità media
+                const intensityCtx = document.getElementById('intensityChart').getContext('2d');
+                intensityChart = new Chart(intensityCtx, {
+                    type: 'line',
+                    data: {
+                        labels: formattedDates,
+                        datasets: [{
+                            label: 'Intensità media',
+                            data: avgIntensitiesRev,
+                            backgroundColor: 'rgba(54, 162, 235, 0.2)',
+                            borderColor: 'rgba(54, 162, 235, 1)',
+                            borderWidth: 2,
+                            tension: 0.1,
+                            fill: true
+                        }]
+                    },
+                    options: {
+                        responsive: true,
+                        maintainAspectRatio: false,
+                        scales: {
+                            y: {
+                                beginAtZero: true,
+                                title: {
+                                    display: true,
+                                    text: 'Intensità'
+                                }
                             },
-                            ticks: {
-                                callback: function(value, index, ticks) {
-                                    return value.toFixed(1);
+                            x: {
+                                title: {
+                                    display: true,
+                                    text: 'Data sessione'
+                                }
+                            }
+                        }
+                    }
+                });
+
+                // Grafico durata allenamenti
+                const durationCtx = document.getElementById('durationChart').getContext('2d');
+                durationChart = new Chart(durationCtx, {
+                    type: 'line',
+                    data: {
+                        labels: formattedDates,
+                        datasets: [{
+                            label: 'Durata (mm:ss)',
+                            data: durationsRev,
+                            backgroundColor: 'rgba(75, 192, 192, 0.2)',
+                            borderColor: 'rgba(75, 192, 192, 1)',
+                            borderWidth: 2,
+                            tension: 0.1,
+                            fill: true
+                        }]
+                    },
+                    options: {
+                        responsive: true,
+                        maintainAspectRatio: false,
+                        scales: {
+                            y: {
+                                beginAtZero: true,
+                                title: {
+                                    display: true,
+                                    text: 'Durata (mm:ss)'
+                                },
+                                ticks: {
+                                    callback: function(value, index, ticks) {
+                                        return formatDuration(value);
+                                    }
+                                }
+                            },
+                            x: {
+                                title: {
+                                    display: true,
+                                    text: 'Data sessione'
                                 }
                             }
                         },
-                        x: {
-                            title: {
-                                display: true,
-                                text: 'Data sessione'
-                            }
-                        }
-                    },
-                    plugins: {
-                        tooltip: {
-                            callbacks: {
-                                label: function(context) {
-                                    return context.dataset.label + ': ' + context.parsed.y.toFixed(1);
+                        plugins: {
+                            tooltip: {
+                                callbacks: {
+                                    label: function(context) {
+                                        return context.dataset.label + ': ' + formatDuration(context.parsed.y);
+                                    }
                                 }
                             }
                         }
                     }
-                }
+                });
+
+                // Grafico frequenza pugni (pugni al minuto)
+                const frequencyCtx = document.getElementById('frequencyChart').getContext('2d');
+                frequencyChart = new Chart(frequencyCtx, {
+                    type: 'line',
+                    data: {
+                        labels: formattedDates,
+                        datasets: [{
+                            label: 'Pugni al minuto',
+                            data: punchFrequenciesRev,
+                            backgroundColor: 'rgba(255, 159, 64, 0.2)',
+                            borderColor: 'rgba(255, 159, 64, 1)',
+                            borderWidth: 2,
+                            tension: 0.1,
+                            fill: true
+                        }]
+                    },
+                    options: {
+                        responsive: true,
+                        maintainAspectRatio: false,
+                        scales: {
+                            y: {
+                                beginAtZero: true,
+                                title: {
+                                    display: true,
+                                    text: 'Pugni al minuto'
+                                },
+                                ticks: {
+                                    callback: function(value, index, ticks) {
+                                        return value.toFixed(1);
+                                    }
+                                }
+                            },
+                            x: {
+                                title: {
+                                    display: true,
+                                    text: 'Data sessione'
+                                }
+                            }
+                        },
+                        plugins: {
+                            tooltip: {
+                                callbacks: {
+                                    label: function(context) {
+                                        return context.dataset.label + ': ' + context.parsed.y.toFixed(1);
+                                    }
+                                }
+                            }
+                        }
+                    }
+                });
             });
         {% endif %}
     </script>
