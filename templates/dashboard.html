@@ -59,10 +59,10 @@
             <div class="collapse navbar-collapse" id="navbarNav">
                 <ul class="navbar-nav me-auto">
                     <li class="nav-item">
-                        <a class="nav-link" href="{{ url_for('training') }}">Progressi</a>
+                        <a class="nav-link" href="{{ url_for('training') }}">Statistiche</a>
                     </li>
                     <li class="nav-item">
-                        <a class="nav-link" href="{{ url_for('stats') }}">Statistiche</a>
+                        <a class="nav-link" href="{{ url_for('stats') }}">Riepilogo</a>
                     </li>
                     <li class="nav-item">
                         <a class="nav-link {% if request.endpoint == 'active_training' %}active{% endif %}" href="{{ url_for('active_training') }}">Nuovo Allenamento</a>
@@ -127,7 +127,7 @@
                             </div>
                         </div>
                         <div class="text-center mt-3">
-                            <a href="{{ url_for('stats') }}" class="btn btn-outline-primary">Vedi dettagli</a>
+                            <a href="{{ url_for('stats') }}" class="btn btn-outline-primary">Riepilogo Allenamenti</a>
                         </div>
                     </div>
                 </div>
@@ -139,8 +139,8 @@
                 <div class="card">
                     <div class="card-body text-center">
                         <h5 class="card-title">I tuoi progressi</h5>
-                        <p class="card-text">Visualizza i dettagli dei tuoi allenamenti e monitora i tuoi progressi.</p>
-                        <a href="{{ url_for('training') }}" class="btn btn-primary mt-3">Visualizza progressi</a>
+                        <p class="card-text">Visualizza grafici e dati dei tuoi allenamenti e monitora i tuoi progressi.</p>
+                        <a href="{{ url_for('training') }}" class="btn btn-primary mt-3">Visualizza Statistiche</a>
                     </div>
                 </div>
             </div>

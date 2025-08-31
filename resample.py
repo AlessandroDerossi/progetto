@@ -8,7 +8,7 @@ from tqdm import tqdm
 from data_module.dataset import PunchDataset
 from data_module.types import RawAnnotatedAction
 
-DEFAULT_THRESHOLD = 40.0  # valore di esempio, puoi modificarla
+DEFAULT_THRESHOLD = 25.0  # valore di esempio, puoi modificarla
 
 class CircularArray():
     def __init__(self, size: int):
@@ -73,7 +73,7 @@ if __name__ == "__main__":
     punch_dataset = PunchDataset.load_samples_from_path("data" / Path(INPUT_DIR))
     
     filtered_dataset = [
-        find_max_subaction(action, window_size=1, threshold=25.0) for action in tqdm(
+        find_max_subaction(action, window_size=1) for action in tqdm(
             punch_dataset.data, 
             desc="Filtering dataset",
             total=len(punch_dataset)
