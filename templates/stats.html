@@ -52,7 +52,7 @@
         }
         .session-details {
             display: grid;
-            grid-template-columns: repeat(3, 1fr);
+            grid-template-columns: repeat(4, 1fr); /* ora 4 colonne */
             gap: 10px;
         }
         .stat-box {
@@ -85,41 +85,12 @@
             margin-top: 5px;
         }
 
-        /* Media query per schermi piccoli come smartphone */
         @media screen and (max-width: 600px) {
-            .header {
-                flex-direction: column;
-                align-items: flex-start;
-            }
-
-            h1 {
-                width: 100%;
-                margin-bottom: 15px;
-            }
-
-            .user-controls {
-                width: 100%;
-                flex-direction: column;
-                align-items: flex-start;
-                margin-top: 10px;
-            }
-
-            .user-controls span {
-                margin-bottom: 10px;
-            }
-
-            .nav-link-custom {
-                display: inline-block;
-                margin-right: 10px;
-                margin-bottom: 5px;
-            }
-
             .session-details {
                 grid-template-columns: 1fr;
             }
         }
 
-        /* Media query per schermi medi come tablet */
         @media screen and (min-width: 601px) and (max-width: 768px) {
             .session-details {
                 grid-template-columns: repeat(2, 1fr);
@@ -161,7 +132,7 @@
         </div>
 
         {% if sessions %}
-            {% for session in sessions %}
+            {% for session in sessions[-20:] %}  {# Mostra solo gli ultimi 20 #}
                 <div class="session-card">
                     <div class="session-title">
                         Sessione del <span class="formatted-date" data-date="{{ session.date }}">{{ session.date }}</span>
@@ -194,6 +165,16 @@
                             <div class="stat-value">{{ session.avg_intensity|round(1) }}</div>
                             <div class="stat-label">Intensità media</div>
                         </div>
+                        <div class="stat-box">
+                            <div class="stat-value">
+                                {% if session.duration > 0 %}
+                                    {{ (session.punch_count / session.duration)|round(1) }}
+                                {% else %}
+                                    0
+                                {% endif %}
+                            </div>
+                            <div class="stat-label">Pugni/min</div>
+                        </div>
                     </div>
                 </div>
             {% endfor %}
@@ -208,41 +189,28 @@
     <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0-alpha1/dist/js/bootstrap.bundle.min.js"></script>
 
     <script>
-        // Formatta le date in formato italiano (gg/mm/aaaa)
         document.addEventListener('DOMContentLoaded', function() {
             const dateElements = document.querySelectorAll('.formatted-date');
-
             dateElements.forEach(function(element) {
                 const dateString = element.getAttribute('data-date');
-
                 try {
-                    // Prova diversi formati di data
                     let date;
-
-                    // Se la data è già in formato gg/mm/aaaa, lasciala così
                     if (dateString.match(/^\d{2}\/\d{2}\/\d{4}$/)) {
                         element.textContent = dateString;
                         return;
                     }
-
-                    // Se è in formato ISO (aaaa-mm-gg) o simile
                     if (dateString.includes('-')) {
                         date = new Date(dateString);
                     } else {
-                        // Prova a parsare altri formati
                         date = new Date(dateString);
                     }
-
-                    // Verifica che la data sia valida
                     if (!isNaN(date.getTime())) {
-                        // Formatta in italiano: gg/mm/aaaa
                         const day = date.getDate().toString().padStart(2, '0');
                         const month = (date.getMonth() + 1).toString().padStart(2, '0');
                         const year = date.getFullYear();
                         element.textContent = `${day}/${month}/${year}`;
                     }
                 } catch (error) {
-                    // Se c'è un errore, lascia la data originale
                     console.log('Errore nel formato della data:', dateString);
                 }
             });
