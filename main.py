@@ -154,10 +154,6 @@ def start_session():
 @app.route('/active_training')
 @login_required
 def active_training():
-    if 'training_user_id' not in session:
-        flash('Nessuna sessione di allenamento preparata')
-        return redirect(url_for('dashboard'))
-
     return render_template('active_training.html',
                            username=current_user.username)
 
