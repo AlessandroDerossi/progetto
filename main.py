@@ -185,60 +185,40 @@ def create_actual_session():
 @app.route('/end_session', methods=['POST'])
 @login_required
 def end_session():
-    # Se la sessione non è mai stata creata nel database
     if not session.get('training_session_created', False):
-        # Pulisci solo le variabili di sessione Flask
-        session.pop('training_user_id', None)
-        session.pop('training_start_time', None)
-        session.pop('training_session_created', None)
-        return json.dumps({'status': 'cancelled', 'message': 'Sessione annullata'}), 200
+        session.clear()
+        return jsonify({'status': 'cancelled', 'message': 'Sessione annullata'}), 200
 
-    # Se la sessione esiste nel database
     if 'training_session_id' in session:
         session_id = session['training_session_id']
-
-        # Ottieni i dati della sessione usando DBManager
         session_data = db_manager.get_training_session(session_id)
 
         if not session_data:
-            # La sessione non esiste più, pulisci le variabili
-            session.pop('training_session_id', None)
-            session.pop('training_user_id', None)
-            session.pop('training_start_time', None)
-            session.pop('training_session_created', None)
-            return json.dumps({'status': 'error', 'message': 'Sessione non trovata'}), 400
+            session.clear()
+            return jsonify({'status': 'error', 'message': 'Sessione non trovata'}), 400
 
-        # Cancella la sessione se non ci sono pugni registrati
+        # Controlla se sono stati passati i secondi reali dal frontend
+        data = request.get_json(silent=True) or {}
+        duration_seconds = data.get("duration_seconds")
+
         if session_data.get('punch_count', 0) == 0:
-            # Cancella accelerazioni e sessione usando DBManager
             db_manager.delete_session_accelerations(session_id)
             db_manager.delete_training_session(session_id)
-
-            # Rimuovi le info della sessione
-            session.pop('training_session_id', None)
-            session.pop('training_user_id', None)
-            session.pop('training_start_time', None)
-            session.pop('training_session_created', None)
-
-            return json.dumps({'status': 'deleted', 'message': 'Sessione eliminata'}), 200
+            session.clear()
+            return jsonify({'status': 'deleted', 'message': 'Sessione eliminata'}), 200
         else:
-            # Calcola e aggiorna la durata usando DBManager
-            duration_minutes = db_manager.calculate_session_duration(session_id)
-
-            if duration_minutes is not None:
-                flash('Allenamento terminato e salvato con successo!')
-
-                # Rimuovi le info della sessione
-                session.pop('training_session_id', None)
-                session.pop('training_user_id', None)
-                session.pop('training_start_time', None)
-                session.pop('training_session_created', None)
-
-                return json.dumps({'status': 'saved', 'message': 'Allenamento salvato con successo'}), 200
+            if duration_seconds is not None:
+                duration_minutes = round(duration_seconds / 60, 2)
+                db_manager.update_training_session(session_id, {'duration': duration_minutes})
             else:
-                return json.dumps({'status': 'error', 'message': 'Errore nel calcolo della durata'}), 500
+                # fallback: se non arriva nulla, calcolo come prima
+                duration_minutes = db_manager.calculate_session_duration(session_id)
 
-    return json.dumps({'status': 'error', 'message': 'Nessuna sessione attiva'}), 400
+            flash('Allenamento terminato e salvato con successo!')
+            session.clear()
+            return jsonify({'status': 'saved', 'message': 'Allenamento salvato con successo'}), 200
+
+    return jsonify({'status': 'error', 'message': 'Nessuna sessione attiva'}), 400
 
 
 @app.route('/upload_data_buffer', methods=['POST'])
