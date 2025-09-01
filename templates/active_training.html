@@ -507,7 +507,7 @@
 
                 debugInfo.textContent = MESSAGES.PUNCH_DETECTED + punches;
 
-                const elapsedMinutes = (Date.now() - startTime) / 60000; // tempo in minuti
+                const elapsedMinutes = seconds / 60; // tempo in minuti
                 const frequency = punches / elapsedMinutes;
                 punchFrequency.textContent = frequency.toFixed(2);
 
