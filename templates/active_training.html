@@ -47,7 +47,6 @@
             gap: 10px;
             margin: 20px 0;
         }
-        /* Stili migliorati per i pulsanti di controllo */
         .btn-start {
             background-color: #28a745;
             border-color: #28a745;
@@ -90,7 +89,7 @@
     </style>
 </head>
 <body>
-    <!-- Navbar -->
+    <!-- Barra di navigazione -->
     <nav class="navbar navbar-expand-lg navbar-dark bg-dark fixed-top">
         <div class="container">
             <a class="navbar-brand" href="#">Boxing Tracker</a>
@@ -117,7 +116,7 @@
         </div>
     </nav>
 
-    <!-- Flash Messages -->
+    <!-- Messaggi Flash -->
     {% with messages = get_flashed_messages() %}
         {% if messages %}
             <div class="container" style="padding-top: 20px;">
@@ -131,7 +130,7 @@
         {% endif %}
     {% endwith %}
 
-    <!-- Training Header -->
+    <!-- Intestazione Allenamento -->
     <div class="training-header">
         <div class="container">
             <div class="row align-items-center">
@@ -142,7 +141,7 @@
         </div>
     </div>
 
-    <!-- Training Content -->
+    <!-- Contenuto Allenamento -->
     <div class="container">
         <div class="row">
             <div class="col-md-12">
@@ -237,10 +236,10 @@
     let hasPunches = false;
     let startTime = null;
 
-    // Accelerometer variables
+    // Variabili accelerometro
     let sensor = null;
     let dataBuffer = [];
-    let highIntensityBuffer = []; // Buffer per la finestra sopra threshold
+    let highIntensityBuffer = []; // Buffer per la finestra sopra soglia
     const HIGH_INTENSITY_THRESHOLD = 25;
     let bufferTimer = null;
     let baselineAcceleration = 10; // Valore base per calibrare il rilevamento
@@ -263,7 +262,7 @@
         NO_PUNCHES: "Nessun pugno rilevato dall'AI. L'allenamento non verrà salvato."
     };
 
-    // Check if accelerometer is available
+    // Verifica se l'accelerometro è disponibile
     function checkAccelerometerSupport() {
         if ('LinearAccelerationSensor' in window) {
             try {
@@ -280,16 +279,16 @@
         }
     }
 
-    // Calibration function
+    // Funzione di calibrazione
     function calibrateAccelerometer() {
         isCalibrating = true;
         calibrationSamples = [];
         debugInfo.textContent = MESSAGES.CALIBRATING;
 
-        // Collect samples for 2 seconds
+        // Raccoglie campioni per 2 secondi
         setTimeout(() => {
             if (calibrationSamples.length > 0) {
-                // Calculate average baseline
+                // Calcola la media di base
                 let sum = 0;
                 for (let sample of calibrationSamples) {
                     sum += sample;
@@ -305,17 +304,17 @@
         }, 2000);
     }
 
-    // Initialize accelerometer and start capturing data
+    // Inizializza l'accelerometro e inizia a catturare i dati
     function initAccelerometer() {
         if (!checkAccelerometerSupport()) {
             alert(MESSAGES.NO_ACCELEROMETER);
             return false;
         }
 
-        // Handle accelerometer readings
+        // Gestisce le letture dell'accelerometro
         sensor.onreading = function() {
             if (isCalibrating) {
-                // Collect calibration samples
+                // Raccoglie campioni di calibrazione
                 const magnitude = Math.sqrt(sensor.x*sensor.x + sensor.y*sensor.y + sensor.z*sensor.z);
                 calibrationSamples.push(magnitude);
                 return;
@@ -327,11 +326,11 @@
             const y = sensor.y;
             const z = sensor.z;
 
-            // Calculate magnitude of acceleration vector
+            // Calcola la magnitudine del vettore di accelerazione
             const magnitude = Math.sqrt(x*x + y*y + z*z);
 
             if (magnitude > HIGH_INTENSITY_THRESHOLD) {
-                // Aggiungi dati al buffer della finestra ad alta intensità
+                // Aggiunge dati al buffer della finestra ad alta intensità
                 highIntensityBuffer.push({
                     timestamp: Date.now(),
                     x: x,
@@ -342,7 +341,7 @@
                 // Se la magnitudine scende sotto la soglia, salva il buffer se non è vuoto
                 if (highIntensityBuffer.length > 0) {
                     saveHighIntensityWindow(highIntensityBuffer);
-                    highIntensityBuffer = []; // Reset buffer
+                    highIntensityBuffer = []; // Resetta buffer
                 }
             }
         };
@@ -352,26 +351,26 @@
             console.error(event.error);
         };
 
-        // Start the sensor
+        // Avvia il sensore
         try {
             sensor.start();
             debugInfo.textContent = MESSAGES.RUNNING;
 
-            // Calibrate after startup
+            // Calibra dopo l'avvio
             calibrateAccelerometer();
 
-            // Set up buffer upload - frequency ridotta a ogni 2 secondi
+            // Imposta il caricamento del buffer - frequenza ridotta a ogni 2 secondi
             bufferTimer = setInterval(uploadDataBuffer, 2000);
 
             return true;
         } catch (error) {
             debugInfo.textContent = MESSAGES.INIT_ERROR + error;
-            console.error("Couldn't start the sensor", error);
+            console.error("Non è stato possibile avviare il sensore", error);
             return false;
         }
     }
 
-    // Show punch animation
+    // Mostra animazione del pugno
     function showPunchAnimation() {
         punchAnimation.style.display = 'block';
         punchAnimation.style.transform = 'scale(1.5)';
@@ -384,20 +383,20 @@
         }, 200);
     }
 
-    // Upload the buffer of data points - ottimizzato per inviare meno dati
+    // Carica il buffer dei punti dati - ottimizzato per inviare meno dati
     function uploadDataBuffer() {
         if (dataBuffer.length === 0) return;
 
-        // Invia solo i dati più significativi - teniamo i 20 punti con maggiore intensità
+        // Invia solo i dati più significativi - mantiene i 20 punti con maggiore intensità
         // Questo riduce drasticamente il traffico di rete
         const significantData = [...dataBuffer]
             .sort((a, b) => b.magnitude - a.magnitude)
             .slice(0, 20);
 
-        // Svuotiamo il buffer originale
+        // Svuota il buffer originale
         dataBuffer = [];
 
-        // Se non ci sono dati significativi, non inviamo nulla
+        // Se non ci sono dati significativi, non invia nulla
         if (significantData.length === 0) {
             return;
         }
@@ -411,14 +410,14 @@
         })
         .then(response => {
             if (response.ok) {
-                console.log(`Uploaded ${significantData.length} data points`);
+                console.log(`Caricati ${significantData.length} punti dati`);
                 debugInfo.textContent = MESSAGES.DATA_SENT + significantData.length + " punti";
             }
         })
-        .catch(error => console.error('Error uploading data buffer:', error));
+        .catch(error => console.error('Errore nel caricamento del buffer dati:', error));
     }
 
-    // Timer function
+    // Funzione timer
     function updateTimer() {
         seconds++;
         const hours = Math.floor(seconds / 3600);
@@ -452,9 +451,8 @@
         })
         .then(response => response.json())
         .then(data => {
-            console.log('High intensity window processed:', data.status);
+            console.log('Finestra ad alta intensità processata:', data.status);
 
-            // NUOVA LOGICA: Se il modello ML ha rilevato un pugno, aggiorna il contatore UI
             if (data.status === 'predicted' && data.label === 'punch') {
                 // Aggiorna il contatore dei pugni nell'interfaccia
                 punches++;
@@ -470,7 +468,7 @@
                 const currentAvgIntensity = (totalIntensity / punches).toFixed(2);
 
 
-                // Aggiorna UI
+                // Aggiorna interfaccia utente
                 punchCounter.textContent = punches;
                 avgIntensity.textContent = currentAvgIntensity;
                 lastPunchIntensity.textContent = peakBufferIntensity.toFixed(2);
@@ -489,10 +487,10 @@
                 console.log('Movimento non classificato come pugno');
             }
         })
-        .catch(error => console.error('Error sending high intensity window:', error));
+        .catch(error => console.error('Errore nell\'invio della finestra ad alta intensità:', error));
     }
 
-    // Event listeners for buttons
+    // Ascoltatori di eventi per i pulsanti
     startButton.addEventListener('click', function() {
         if (!isRunning) {
             // Prima crea la sessione nel database
@@ -524,7 +522,7 @@
                 }
             })
             .catch(error => {
-                console.error('Error creating session:', error);
+                console.error('Errore nella creazione della sessione:', error);
                 alert('Errore di connessione nella creazione della sessione');
                 debugInfo.textContent = 'Errore di connessione nella creazione della sessione';
             });
@@ -539,7 +537,7 @@
             try {
                 sensor.stop();
             } catch (e) {
-                console.error("Error stopping sensor:", e);
+                console.error("Errore nell'arresto del sensore:", e);
             }
         }
 
@@ -547,14 +545,14 @@
             clearInterval(bufferTimer);
         }
 
-        // Upload any remaining data
+        // Carica eventuali dati rimanenti
         uploadDataBuffer();
 
-        // Check if any punches were recorded by the ML model
+        // Verifica se sono stati registrati pugni dal modello ML
         if (!hasPunches) {
             alert(MESSAGES.NO_PUNCHES);
 
-            // End the session with deletion
+            // Termina la sessione con cancellazione
             fetch('{{ url_for("end_session") }}', {
                 method: 'POST'
             })
@@ -564,11 +562,11 @@
                     window.location.href = '{{ url_for("dashboard") }}';
                 }
             })
-            .catch(error => console.error('Error ending session:', error));
+            .catch(error => console.error('Errore nel terminare la sessione:', error));
             return;
         }
 
-        // End the session with saving
+        // Termina la sessione con salvataggio
         fetch('{{ url_for("end_session") }}', {
             method: 'POST'
         })
@@ -578,10 +576,10 @@
                 window.location.href = '{{ url_for("dashboard") }}';
             }
         })
-        .catch(error => console.error('Error ending session:', error));
+        .catch(error => console.error('Errore nel terminare la sessione:', error));
     });
 
-    // Check for accelerometer permission
+    // Verifica i permessi dell'accelerometro
     if (navigator.permissions) {
         navigator.permissions.query({ name: 'accelerometer' })
         .then(result => {
@@ -594,13 +592,13 @@
                 debugInfo.textContent = "Accelerometro: permesso in attesa di approvazione. Premi 'Inizia' quando pronto.";
             }
 
-            // Listen for permission changes
+            // Ascolta per i cambiamenti dei permessi
             result.onchange = function() {
                 if (result.state === 'denied') {
                     debugInfo.textContent = MESSAGES.PERMISSION_DENIED;
                     alert(MESSAGES.PERMISSION_DENIED);
                     if (isRunning) {
-                        // Stop the session if it's running
+                        // Ferma la sessione se è in esecuzione
                         stopButton.click();
                     }
                 } else if (result.state === 'granted') {
@@ -609,7 +607,7 @@
             };
         })
         .catch(error => {
-            console.error("Error checking permission:", error);
+            console.error("Errore nella verifica dei permessi:", error);
             debugInfo.textContent = "Impossibile verificare i permessi dell'accelerometro";
         });
     } else {
