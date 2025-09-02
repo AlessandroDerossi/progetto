@@ -29,6 +29,15 @@ print("Modello caricato, pronto per predizioni.")
 def load_user(user_id):
     return db_manager.load_user(user_id)
 
+def clear_training_session():
+    keys_to_remove = [
+        'training_user_id',
+        'training_start_time',
+        'training_session_created',
+        'training_session_id'
+    ]
+    for key in keys_to_remove:
+        session.pop(key, None)
 
 @app.route('/')
 @login_required  # Manda direttamente al login se non autenticato
@@ -186,7 +195,7 @@ def create_actual_session():
 @login_required
 def end_session():
     if not session.get('training_session_created', False):
-        session.clear()
+        clear_training_session()
         return jsonify({'status': 'cancelled', 'message': 'Sessione annullata'}), 200
 
     if 'training_session_id' in session:
@@ -194,18 +203,17 @@ def end_session():
         session_data = db_manager.get_training_session(session_id)
 
         if not session_data:
-            session.clear()
+            clear_training_session()
             return jsonify({'status': 'error', 'message': 'Sessione non trovata'}), 400
 
         # Controlla se sono stati passati i secondi reali dal frontend
         data = request.get_json(silent=True) or {}
         duration_seconds = data.get("duration_seconds")
 
-        if session_data.get('punch_count', 0) == 0 or duration_seconds is None:
+        if session_data.get('punch_count', 0) == 0:
             db_manager.delete_session_accelerations(session_id)
             db_manager.delete_training_session(session_id)
-            flash('Nessun pugno rilevato, allenamento eliminato!')
-            session.clear()
+            clear_training_session()
             return jsonify({'status': 'deleted', 'message': 'Sessione eliminata'}), 200
         else:
             if duration_seconds is not None:
@@ -216,7 +224,7 @@ def end_session():
                 duration_minutes = db_manager.calculate_session_duration(session_id)
 
             flash('Allenamento terminato e salvato con successo!')
-            session.clear()
+            clear_training_session()
             return jsonify({'status': 'saved', 'message': 'Allenamento salvato con successo'}), 200
 
     return jsonify({'status': 'error', 'message': 'Nessuna sessione attiva'}), 400
