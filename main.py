@@ -210,9 +210,10 @@ def end_session():
         data = request.get_json(silent=True) or {}
         duration_seconds = data.get("duration_seconds")
 
-        if session_data.get('punch_count', 0) == 0:
+        if session_data.get('punch_count', 0) == 0 or duration_seconds is None:
             db_manager.delete_session_accelerations(session_id)
             db_manager.delete_training_session(session_id)
+            flash('Nessun pugno rilevato, sessione eliminata.')
             clear_training_session()
             return jsonify({'status': 'deleted', 'message': 'Sessione eliminata'}), 200
         else:
